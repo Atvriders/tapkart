@@ -10,7 +10,9 @@
    - Once the module exists but is missing one specific named type, `tsc` reports `TS2305: Module '"../src/types"' has no exported member 'WireKart'` (verified directly) — one such error per missing name, all pointing at the same import line.
    - Once the module does not exist at all, `tsc` reports `TS2307: Cannot find module '../src/types' or its corresponding type declarations` — for *every* import from it, value or type-only alike, because `tsc` (unlike the vitest/esbuild runtime path) always resolves the module to type-check it.
 
-   `types.ts` is a pure interface file with only one runtime value (`PROTOCOL_VERSION`). Steps 5–6 and 8–9 below take their RED from `tsc`; only the `PROTOCOL_VERSION` test (Steps 3–4) takes it from vitest. Do not run vitest on the type-shape tests expecting a red result — it will pass whether or not the types exist, which is exactly the failure mode ("a green vitest run 'proving' a vacuous RED") that let two of Plan 1's control tests ship silently wrong.
+   `types.ts` is a pure interface file with only one runtime value (`PROTOCOL_VERSION`) until Step 13 below adds three more (`WIRE_TAG`, `encodeHeader`, `decodeHeader`). Steps 5–6 and 8–9 below take their RED from `tsc`; the `PROTOCOL_VERSION` test (Steps 3–4) and the `WIRE_TAG`/`encodeHeader`/`decodeHeader` tests (Steps 11–14) take theirs from vitest, since all four are runtime values, not type-only imports. Do not run vitest on the type-shape tests expecting a red result — it will pass whether or not the types exist, which is exactly the failure mode ("a green vitest run 'proving' a vacuous RED") that let two of Plan 1's control tests ship silently wrong.
+
+3. **`WIRE_TAG`, `encodeHeader` and `decodeHeader` are in this task's scope.** An earlier draft of this brief's Produces list omitted all three even though contract §3 assigns them to `types.ts`: *"Every datagram begins with this one byte. Without a shared tag a receiver cannot dispatch, and each of Tasks 11/14/15/16 would invent its own — which is exactly what happened when this was left unspecified."* That is precisely what happened: without this task producing them, downstream tasks built incompatible, un-interoperable tag schemes. Steps 11–14 below add all three with real TDD coverage, including `decodeHeader` throwing on an unrecognised tag byte and on a `PROTOCOL_VERSION` mismatch.
 
 **Files:**
 - Create: `packages/protocol/package.json`
@@ -37,6 +39,9 @@
   - `export type ChannelName = 'unreliable' | 'reliable'`
   - `export type MessageKind = 'hello' | 'welcome' | 'lobby' | 'start' | 'input' | 'snapshot' | 'events' | 'checkpoint' | 'authorityChange' | 'ping' | 'pong'`
   - `export interface WireHeader { kind: MessageKind; protocolVersion: number }`
+  - `export const WIRE_TAG = { hello: 0x01, welcome: 0x02, lobby: 0x03, start: 0x04, input: 0x10, snapshot: 0x11, events: 0x12, checkpoint: 0x13, authorityChange: 0x20, ping: 0x30, pong: 0x31 } as const` — the one byte every datagram begins with.
+  - `export function encodeHeader(out: Uint8Array, kind: MessageKind): number` — writes `out[0] = WIRE_TAG[kind]`, `out[1] = PROTOCOL_VERSION`, returns `2`.
+  - `export function decodeHeader(buf: Uint8Array): WireHeader` — throws on a tag byte with no matching `MessageKind` and on a `protocolVersion` that does not equal `PROTOCOL_VERSION`.
   - `export interface WireKart { ... }` — 21 fields, listed in full in Step 8.
   - `export interface WireEntity { ... }` — 7 fields.
   - `export interface WireSnapshot { ... }` — 6 fields.
@@ -342,11 +347,35 @@ Expected: PASS — 7 tests. This run is now meaningful (it was not, in Step 8): 
 
 ---
 
-- [ ] **Step 11: Write the failing test — the barrel**
+- [ ] **Step 11: Write the failing test — `WIRE_TAG`, `encodeHeader`, `decodeHeader`**
 
-Append a new test to `packages/protocol/test/types.test.ts`, after the `describe('protocol wire types', ...)` block closes. Before (the file's last two lines):
+In `packages/protocol/test/types.test.ts`, widen the value import. Before:
 
 ```ts
+import { PROTOCOL_VERSION } from '../src/types'
+import type {
+  ChannelName, InputDatagram, MessageKind, WireEntity, WireHeader, WireKart, WireSnapshot,
+} from '../src/types'
+import type { EntityKind, Intent, ItemKind, Surface } from '@tapkart/sim'
+```
+
+After:
+
+```ts
+import { PROTOCOL_VERSION, WIRE_TAG, decodeHeader, encodeHeader } from '../src/types'
+import type {
+  ChannelName, InputDatagram, MessageKind, WireEntity, WireHeader, WireKart, WireSnapshot,
+} from '../src/types'
+import type { EntityKind, Intent, ItemKind, Surface } from '@tapkart/sim'
+```
+
+Then append a new `describe` block at the end of the file, after `describe('protocol wire types', ...)`'s closing `})`. Before:
+
+```ts
+  it('builds an InputDatagram with both fields', () => {
+    const intent: Intent = { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    const id: InputDatagram = { playerId: 0, intents: [intent] }
+    expect(Object.keys(id).length).toBe(2)
     expect(id.intents).toHaveLength(1)
   })
 })
@@ -355,7 +384,165 @@ Append a new test to `packages/protocol/test/types.test.ts`, after the `describe
 After:
 
 ```ts
+  it('builds an InputDatagram with both fields', () => {
+    const intent: Intent = { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    const id: InputDatagram = { playerId: 0, intents: [intent] }
+    expect(Object.keys(id).length).toBe(2)
     expect(id.intents).toHaveLength(1)
+  })
+})
+
+describe('WIRE_TAG, encodeHeader, decodeHeader', () => {
+  const ALL_KINDS: MessageKind[] = [
+    'hello', 'welcome', 'lobby', 'start', 'input', 'snapshot', 'events',
+    'checkpoint', 'authorityChange', 'ping', 'pong',
+  ]
+
+  it('fixes a distinct byte for every MessageKind the contract lists', () => {
+    expect(WIRE_TAG).toEqual({
+      hello: 0x01, welcome: 0x02, lobby: 0x03, start: 0x04,
+      input: 0x10, snapshot: 0x11, events: 0x12, checkpoint: 0x13,
+      authorityChange: 0x20, ping: 0x30, pong: 0x31,
+    })
+    // Every datagram is dispatched on this one byte alone, so no two kinds
+    // may share a value.
+    const values = Object.values(WIRE_TAG)
+    expect(new Set(values).size).toBe(values.length)
+  })
+
+  it('encodeHeader writes [tag, PROTOCOL_VERSION] and returns 2', () => {
+    const out = new Uint8Array(4).fill(0xff)
+    const n = encodeHeader(out, 'snapshot')
+    expect(n).toBe(2)
+    expect(out[0]).toBe(WIRE_TAG.snapshot)
+    expect(out[1]).toBe(PROTOCOL_VERSION)
+    expect(out[2]).toBe(0xff) // encodeHeader writes only its own 2 bytes
+  })
+
+  it('decodeHeader round-trips every MessageKind through encodeHeader', () => {
+    const buf = new Uint8Array(2)
+    for (const kind of ALL_KINDS) {
+      encodeHeader(buf, kind)
+      const h: WireHeader = decodeHeader(buf)
+      expect(h.kind).toBe(kind)
+      expect(h.protocolVersion).toBe(PROTOCOL_VERSION)
+    }
+  })
+
+  it('decodeHeader throws on a tag byte no MessageKind maps to', () => {
+    // 0x99 is not one of WIRE_TAG's eleven values.
+    const buf = new Uint8Array([0x99, PROTOCOL_VERSION])
+    expect(() => decodeHeader(buf)).toThrow(/unknown wire tag/)
+  })
+
+  it('decodeHeader throws on a PROTOCOL_VERSION mismatch', () => {
+    const buf = new Uint8Array([WIRE_TAG.input, PROTOCOL_VERSION + 1])
+    expect(() => decodeHeader(buf)).toThrow(/protocol version/)
+  })
+})
+```
+
+- [ ] **Step 12: Run test to verify it fails**
+
+Run: `npx vitest run packages/protocol/test/types.test.ts -t "WIRE_TAG, encodeHeader, decodeHeader"`
+Expected: FAIL, all 5 tests, for two distinct reasons. Verified directly against this repo's esbuild-transpiled vitest by probing the identical pattern against an existing module (`packages/sim/src/state.ts`, importing two names it does not export): a named **value** import with no matching export binds to `undefined` at the call site rather than failing module resolution, because `types.ts` already exists and exports `PROTOCOL_VERSION` — the whole file still collects and runs.
+
+- `'fixes a distinct byte for every MessageKind the contract lists'`: `AssertionError: expected undefined to deeply equal {...}` — `WIRE_TAG` is `undefined`, and `toEqual` compares it directly without throwing (probed: `expect(undefined).toEqual({ hello: 1 })` reports exactly this).
+- `'encodeHeader writes [tag, PROTOCOL_VERSION] and returns 2'`: `TypeError: encodeHeader is not a function` — `encodeHeader` is `undefined`, called as a function.
+- `'decodeHeader round-trips every MessageKind through encodeHeader'`: the same `TypeError: encodeHeader is not a function`, at the first `encodeHeader(buf, kind)` call inside the loop.
+- `'decodeHeader throws on a tag byte no MessageKind maps to'`: the `toThrow(/unknown wire tag/)` assertion itself fails, not the call — `decodeHeader` is `undefined`, so calling it throws `TypeError: decodeHeader is not a function`, which does not match `/unknown wire tag/`: `AssertionError: expected [Function] to throw error matching /unknown wire tag/ but got '...is not a function'` (probed against the same pattern).
+- `'decodeHeader throws on a PROTOCOL_VERSION mismatch'`: the same shape as above, mismatched against `/protocol version/`.
+
+- [ ] **Step 13: Write the minimal implementation — `WIRE_TAG`, `encodeHeader`, `decodeHeader`**
+
+In `packages/protocol/src/types.ts`, insert after `WireHeader` and before `WireKart`. Before:
+
+```ts
+export interface WireHeader { kind: MessageKind; protocolVersion: number }
+
+export interface WireKart {
+```
+
+After:
+
+```ts
+export interface WireHeader { kind: MessageKind; protocolVersion: number }
+
+// Every datagram begins with this byte, so a receiver can dispatch before
+// decoding anything else. Without a shared tag, Tasks 11/14/15/16 would each
+// invent their own -- which is exactly what happened when this was left
+// unspecified in an earlier draft of this contract.
+export const WIRE_TAG = {
+  hello: 0x01, welcome: 0x02, lobby: 0x03, start: 0x04,
+  input: 0x10, snapshot: 0x11, events: 0x12, checkpoint: 0x13,
+  authorityChange: 0x20, ping: 0x30, pong: 0x31,
+} as const
+
+const TAG_TO_KIND = ((): ReadonlyMap<number, MessageKind> => {
+  const m = new Map<number, MessageKind>()
+  for (const kind of Object.keys(WIRE_TAG) as MessageKind[]) {
+    m.set(WIRE_TAG[kind], kind)
+  }
+  return m
+})()
+
+/** Writes [tag, PROTOCOL_VERSION] into out[0..1] and returns 2, the byte count. */
+export function encodeHeader(out: Uint8Array, kind: MessageKind): number {
+  out[0] = WIRE_TAG[kind]
+  out[1] = PROTOCOL_VERSION
+  return 2
+}
+
+/**
+ * Reads the 2-byte header written by encodeHeader. Throws on an unrecognised
+ * tag byte or a PROTOCOL_VERSION that does not match this build's.
+ */
+export function decodeHeader(buf: Uint8Array): WireHeader {
+  const tag = buf[0]
+  const kind = TAG_TO_KIND.get(tag)
+  if (kind === undefined) {
+    throw new Error(`decodeHeader: unknown wire tag ${tag}`)
+  }
+  const protocolVersion = buf[1]
+  if (protocolVersion !== PROTOCOL_VERSION) {
+    throw new Error(
+      `decodeHeader: protocol version mismatch (expected ${PROTOCOL_VERSION}, got ${protocolVersion})`,
+    )
+  }
+  return { kind, protocolVersion }
+}
+
+export interface WireKart {
+```
+
+- [ ] **Step 14: Run test to verify it passes**
+
+Run: `npx vitest run packages/protocol/test/types.test.ts -t "WIRE_TAG, encodeHeader, decodeHeader"`
+Expected: PASS — 5 tests.
+
+Run: `npx tsc --noEmit -p packages/protocol`
+Expected: no output, exit code 0.
+
+---
+
+- [ ] **Step 15: Write the failing test — the barrel**
+
+Append a new test to `packages/protocol/test/types.test.ts`, after the `describe('WIRE_TAG, encodeHeader, decodeHeader', ...)` block closes (Step 11 made this the file's last block). Before (the file's last four lines):
+
+```ts
+  it('decodeHeader throws on a PROTOCOL_VERSION mismatch', () => {
+    const buf = new Uint8Array([WIRE_TAG.input, PROTOCOL_VERSION + 1])
+    expect(() => decodeHeader(buf)).toThrow(/protocol version/)
+  })
+})
+```
+
+After:
+
+```ts
+  it('decodeHeader throws on a PROTOCOL_VERSION mismatch', () => {
+    const buf = new Uint8Array([WIRE_TAG.input, PROTOCOL_VERSION + 1])
+    expect(() => decodeHeader(buf)).toThrow(/protocol version/)
   })
 })
 
@@ -369,12 +556,12 @@ describe('@tapkart/protocol barrel', () => {
 
 This is a dynamic import (not a static one at the top of the file) so a resolution failure fails this one test rather than the whole file, matching `packages/sim/test/barrel.test.ts`'s own `'resolves through the @tapkart/sim package entry point'` test, which this mirrors.
 
-- [ ] **Step 12: Run test to verify it fails**
+- [ ] **Step 16: Run test to verify it fails**
 
 Run: `npx vitest run packages/protocol/test/types.test.ts -t "resolves through the package entry point"`
 Expected: FAIL. `packages/protocol/package.json`'s `exports` map already points `"."` at `./src/index.ts` (Step 1), but that file does not exist yet, so Node's package resolution fails: `Error: Cannot find module '@tapkart/protocol' imported from ...` (or equivalent — the exact wording depends on Vite's resolver, but the failure is a resolution error, not an assertion error, because there is nothing at the far end of the `exports` map yet).
 
-- [ ] **Step 13: Write the minimal implementation — the barrel**
+- [ ] **Step 17: Write the minimal implementation — the barrel**
 
 Create `packages/protocol/src/index.ts`:
 
@@ -388,17 +575,17 @@ Create `packages/protocol/src/index.ts`:
 export * from './types'
 ```
 
-- [ ] **Step 14: Run test to verify it passes**
+- [ ] **Step 18: Run test to verify it passes**
 
 Run: `npx vitest run packages/protocol/test/types.test.ts`
-Expected: PASS — 8 tests.
+Expected: PASS — 13 tests (3 from Step 3 + 4 from Step 7 + 5 from Step 11 + 1 barrel test from Step 15).
 
 ---
 
-- [ ] **Step 15: Run the whole package and typecheck**
+- [ ] **Step 19: Run the whole package and typecheck**
 
 Run: `npx vitest run packages/protocol`
-Expected: PASS — 8 tests, 1 file.
+Expected: PASS — 13 tests, 1 file.
 
 Run: `npx tsc --noEmit -p packages/protocol`
 Expected: no output, exit code 0.
@@ -406,13 +593,13 @@ Expected: no output, exit code 0.
 Run: `npm run typecheck` (repo root)
 Expected: exit code 0. This runs `typecheck` in every workspace with that script (`--workspaces --if-present`), so it now also covers `packages/sim`; confirm it still reports success there too, since this task did not touch `packages/sim`.
 
-- [ ] **Step 16: Commit**
+- [ ] **Step 20: Commit**
 
 ```bash
 git add packages/protocol/package.json packages/protocol/tsconfig.json \
         packages/protocol/src/types.ts packages/protocol/src/index.ts \
         packages/protocol/test/types.test.ts package-lock.json
-git commit -m "feat(protocol): scaffold packages/protocol, wire message types and its barrel
+git commit -m "feat(protocol): scaffold packages/protocol, wire message types, header codec and its barrel
 
 New npm workspace mirroring packages/sim's package.json/tsconfig.json shape,
 depending on @tapkart/sim for Vec3/Surface/ItemKind/EntityKind/Intent and on
@@ -421,15 +608,25 @@ WireHeader, and the WireKart/WireEntity/WireSnapshot/InputDatagram wire
 shapes exactly as the locked contract's §3 lists them -- decode targets, not
 SimState, and lossy by construction.
 
+WIRE_TAG, encodeHeader and decodeHeader also ship here: the one shared 2-byte
+tag+version header every datagram begins with, so a receiver can dispatch
+before decoding anything else. decodeHeader throws on an unrecognised tag
+byte and on a PROTOCOL_VERSION mismatch. Without this, every later task that
+sends a message would invent its own incompatible tag scheme.
+
 src/index.ts re-exports types.ts and is created now, not deferred to Task 18,
 because packages/net needs ChannelName from Task 11 onward and must reach it
 through @tapkart/protocol rather than a relative path across the package
 boundary.
 
-types.ts is a pure interface file with one runtime value; the RED for every
+types.ts is mostly a pure interface file; the RED for every type-only
 interface in it came from tsc (TS2307 while the module didn't exist, TS2305
 once it existed but a name was still missing), not vitest -- a type-only
 import of a missing module is erased by verbatimModuleSyntax before module
 resolution and passes vitest vacuously, verified directly before writing
-these steps."
+these steps. PROTOCOL_VERSION, WIRE_TAG, encodeHeader and decodeHeader are
+runtime values, so their RED came from vitest instead, also verified
+directly: a named value import with no matching export binds to undefined
+at the call site rather than failing module resolution, once the module
+itself already exists."
 ```

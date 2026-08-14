@@ -8,7 +8,10 @@
 
 - Consumes:
   - `packages/sim/src/types.ts` (via `@tapkart/sim`) — `MAX_KARTS = 8`, `MAX_ENTITIES = 32`,
-    `Intent`, `AuthEvent`, `KartState`, `SimContext`, `SimState`, `Vec3`.
+    `TICK_HZ = 60`, `Intent`, `AuthEvent`, `KartState`, `SimContext`, `SimState`, `Vec3`.
+    `TICK_HZ` is added in this brief's residual-findings pass, to timestamp
+    `RemoteInterpolator` keyframes without a `Date.now()` call anywhere in this file
+    (contract §0: "ticks only").
   - `packages/sim/src/state.ts` (via `@tapkart/sim`) — `createState`, `cloneState`.
   - `packages/sim/src/replay.ts` [Plan 1, Task 16] (via `@tapkart/sim`) — `allocStateLike`.
     Verified present and barrel-exported by reading `packages/sim/src/replay.ts` and
@@ -23,16 +26,27 @@
     `export function applyEvent(ctx: SimContext, state: SimState, ev: AuthEvent): boolean`.
     This task is downstream of Task 13 and consumes it verbatim; Task 13's own
     brief documents its per-kind behavior in full.
-  - `packages/protocol/src/types.ts` [Task 3] — `ChannelName`.
-  - `packages/protocol/src/quant.ts` [Task 5] — `export const EPS: EpsilonTable`.
-    **Ambiguity flagged, not silently assumed:** the locked contract gives `EPS`'s
-    *type* as `EpsilonTable` but never states that interface's field names —
-    Task 5's brief is not part of what this task was handed. This task assumes
-    `EpsilonTable` has exactly one numeric field per §4 row that is epsilon-compared
-    (the six "band"/"shortest signed angle" rows — every `Object.is`/exact row needs
-    no epsilon constant at all): `position`, `velocity`, `heading`, `angularVelocity`,
-    `driftCharge`, `lapT`. If Task 5 ships different field names, only this task's
-    six `EPS.*` reads need renaming — nothing else here depends on the shape.
+  - `packages/protocol/src/types.ts` [Task 3] — `ChannelName`, `MessageKind`,
+    `WireHeader`, and the shared message header:
+    `encodeHeader(out: Uint8Array, kind: MessageKind): number` (writes 2 bytes —
+    tag + protocol version — and returns 2) and
+    `decodeHeader(buf: Uint8Array): WireHeader` (throws on an unknown tag or a
+    version mismatch). Every datagram this loop sends starts with that header
+    and every datagram it receives is dispatched on `decodeHeader(data).kind`.
+    This is not optional and not this task's invention: contract §3 assigns the
+    header to Task 3 precisely so `AuthorityLoop`, `ClientLoop` and `ShadowLoop`
+    can read each other, and spec §5 has every client sending its input to
+    **both** the host and the shadow, so at least one receiver in the deployed
+    topology sees more than one kind on one channel.
+  - `packages/protocol/src/quant.ts` [Task 5] — `export const EPS: EpsilonTable`,
+    and `quantStep(min, max, bits)` (tests only). `EpsilonTable`'s field names are
+    **pinned by contract §3/§4**, not assumed by this task: exactly six keys, one
+    per continuous row — `position`, `velocity`, `heading`, `angularVelocity`,
+    `driftCharge`, `t`. Contract §4 states it outright: *"The key is `t`, not
+    `lap.t`, matching the flat `WireKart` interface in §3."* An earlier draft of
+    this brief used `EPS.lapT` and called the name an open assumption; it is not
+    one, and `EPS.lapT` would be `undefined`, which makes every `> undefined`
+    comparison `false` and silently disables the `t` check.
   - `packages/protocol/src/snapshot.ts` [Task 6] — `WireKart`, `WireEntity`, `WireSnapshot`,
     `decodeSnapshot`.
   - `packages/protocol/src/events.ts` [Task 9] — `decodeEvents`.
@@ -45,21 +59,63 @@
   - `packages/sim/src/items.ts` (via `@tapkart/sim`) — `itemBoxWorldPos`, test-only.
 
 - Produces:
-  - `export class ClientLoop { constructor(ctx: SimContext, playerId: number, t: Transport); tick(localIntent: Intent): void; corrections(): number }`
-    (locked contract §5, verbatim).
+  - The locked contract §5 class, verbatim — **all four members**:
+    ```ts
+    export class ClientLoop {
+      constructor(ctx: SimContext, playerId: number, t: Transport)
+      tick(localIntent: Intent): void
+      corrections(): number     // count, for the zero-corrections test
+      state(): SimState         // read-only view; the convergence test asserts on it directly
+    }
+    ```
+    `state()` returns the live `predicted` state — the object `tick()` advances,
+    not a copy. An earlier draft of this brief listed a three-member shape and
+    called *that* "locked contract §5, verbatim"; it was not. The omission cost
+    real coverage downstream: two tests in this file and one in Task 17 asserted
+    `not.toThrow()` or a corrections counter because they had no way to look at
+    the state they were actually testing. Those tests are rewritten below to use
+    `state()`.
+  - `const HEADER_BYTES = 2`, private to this file — the width `encodeHeader`
+    writes, and therefore the payload offset every receive path must skip.
+    Contract §3 fixes the value but exports no constant for it, and §0 allows a
+    task to define what it needs in its own files. `authority.ts` and `shadow.ts`
+    each declare the same private constant rather than importing one `net`
+    module into another.
   - Additional exports, this task's own, not in the locked contract (permitted:
     "a task needing something absent must define it in its own files and say so"):
     `export const REMOTE_INTERP_DELAY_MS = 100`, `export const REMOTE_BUFFER_CAPACITY = 8`,
     `export const REMOTE_EXTRAPOLATE_CAP_MS = 200`, `export interface RemoteKeyframe`,
-    `export interface RemoteSample`, `export class RemoteInterpolator`. These exist
-    because spec §5 requires remote-kart/entity interpolation-with-extrapolation-cap
-    to exist and be tested (this brief's "non-negotiables"), but `ClientLoop`'s
-    locked constructor/tick/corrections shape has no way to surface rendering data,
-    and there is no accessor for it in the locked contract to reuse. Wiring
-    `RemoteInterpolator` to an actual renderer, and to `ClientLoop`'s own incoming
-    `WireSnapshot` stream, is a later plan's job (`render`/`game`); this task ships
-    it standalone, fully tested on its own, rather than silently computing
-    something inside `ClientLoop` that nothing could ever retrieve.
+    `export interface RemoteSample`, `export class RemoteInterpolator`, and — added in
+    this brief's residual-findings pass —
+    `export function remoteInterpolatorOf(client: ClientLoop): RemoteInterpolator`.
+    These exist because spec §5 requires remote-kart/entity
+    interpolation-with-extrapolation-cap to exist, be fed from the live wire, and be
+    tested (this brief's "non-negotiables"), but nothing in `ClientLoop`'s locked
+    four-member shape can surface rendering data. `state()` does not close this: it
+    exposes the *predicted* `SimState`, whose remote seats are locally-simulated bot
+    trajectories that spec §5 says must never be trusted or rendered — the
+    interpolated, 100 ms-delayed positions a renderer actually needs are a different
+    quantity with no accessor on the locked class.
+
+    `remoteInterpolatorOf` is a **free function, not a class method**: contract §5
+    fixes `ClientLoop` at exactly four members and §0 forbids any task adding a
+    field to a locked signature, so a fifth public method is not available regardless
+    of how useful it would be. A private, module-scope `WeakMap<ClientLoop,
+    RemoteInterpolator>` lets a same-module free function reach a per-instance value
+    without touching the class's own public surface at all — the same "define what
+    you need in your own files" allowance already used for `RemoteInterpolator`
+    itself, applied one level further out.
+
+    `ClientLoop`'s own `onMessage` now pushes every newly-accepted snapshot's karts
+    into its `RemoteInterpolator` (Steps 12–15 below) — this is the half of "wired to
+    nothing" that belongs to Plan 2, because it is purely a data-availability
+    question inside a package this plan already owns, with no dependency on anything
+    that doesn't exist yet. Wiring the *output* to an actual renderer remains a later
+    plan's job (`render`/`game`, which does not exist in this repo): that is a
+    presentation concern needing a scene graph and a frame clock this plan has
+    neither of, not a data-plumbing one. Before this pass, `RemoteInterpolator`
+    shipped standalone — implemented and tested in isolation, fed by nothing —
+    which is the gap Task 15's audit named as spec §5 "PARTIAL."
 
 ---
 
@@ -189,14 +245,20 @@ still-settling residue from the initial input round-trip. `360` ticks (6s) gave
   replay re-applies each entry's recorded events immediately after replaying
   that entry's `step()`, in the same order, which `applyEvent`'s own
   eventSeq-gating makes idempotent-safe regardless.
-- **`corrections()` is the test's only instrument** for the zero-corrections
-  invariant — locked contract §4: *"That test is what proves the epsilons are
-  above the noise floor... no epsilon may be tuned down."* Nothing else in this
-  class exposes reconciliation activity; a test that wants to know "did it
-  correct" reads this counter, before and after, and diffs.
+- **`corrections()` is the instrument for the zero-corrections invariant, and
+  `state()` is the instrument for everything else.** Locked contract §4:
+  *"That test is what proves the epsilons are above the noise floor... no
+  epsilon may be tuned down."* Nothing but the counter exposes reconciliation
+  *activity*, so a test that wants to know "did it correct" reads the counter
+  before and after and diffs. But a counter is a poor instrument for
+  "converged": zero corrections is also what a client with a dead transport
+  reports. Every test below that asserts a zero delta therefore pairs it with
+  two controls — a count of snapshots that actually arrived in the measured
+  window, and a direct `state()` comparison against the authority's own kart.
 - **The epsilon compare never uses a tolerance tighter than `EPS`.** `ownKartDiverged`
-  below reads every `EPS.*` field exactly as `quant.ts` defines it (per this
-  task's stated field-name assumption) and compares with strict `>`, never a
+  below reads all six `EPS` keys by the names contract §3/§4 pins — `position`,
+  `velocity`, `heading`, `angularVelocity`, `driftCharge`, **`t`** — and
+  compares with strict `>`, never a
   hand-tightened constant — the buzzing-kart failure the whole epsilon table
   exists to prevent (locked contract §0) is a corrections-counter that fires on
   quantization noise alone, which is precisely the failure Step 12's test would
@@ -210,15 +272,26 @@ Create `packages/net/test/client.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
+import type { Intent } from '@tapkart/sim'
 import { createState } from '@tapkart/sim'
 import type { InputDatagram } from '@tapkart/protocol'
-import { decodeInput } from '@tapkart/protocol'
+import { decodeHeader, decodeInput, quantStep } from '@tapkart/protocol'
 import { ClientLoop } from '../src/client'
 import { makeLossyPair, makeNetContext } from './fixtures/net-fixtures'
 
 const OWN = 4
 
-function mkIntent(steer: number): { tick: number; steer: number; accel: number; brake: boolean; drift: boolean; useItem: boolean } {
+/** encodeHeader writes tag + protocolVersion; locked contract §3 fixes it at 2. */
+const HEADER_BYTES = 2
+
+/** encodeInput quantises steer over [-1, 1] at 8 bits (Task 10), so a value
+ * that round-trips is only ever accurate to one step. Asserting a decoded
+ * steer to five decimal places would fail on a correct encoder: 0.02 lands on
+ * bucket 130 and comes back 0.0196078…, an error of 3.9e-4 against a 5e-6
+ * tolerance. Compare against the step instead of a hand-picked digit count. */
+const STEER_STEP = quantStep(-1, 1, 8)
+
+function mkIntent(steer: number): Intent {
   return { tick: 0, steer, accel: 1, brake: false, drift: false, useItem: false }
 }
 
@@ -234,13 +307,44 @@ describe('ClientLoop — local prediction', () => {
     const pair = makeLossyPair({ latencyMs: 1, jitterMs: 0, lossRate: 0, seed: 1 })
     const client = new ClientLoop(ctx, OWN, pair.a)
 
-    for (let t = 0; t < 60; t++) client.tick(mkIntent(0.2))
+    const startX = client.state().karts[OWN].position.x
+    const startZ = client.state().karts[OWN].position.z
+    expect(client.state().tick).toBe(0)
 
-    // No direct accessor for predicted state exists (locked constructor/tick/
-    // corrections only) - corrections() staying at 0 with nothing received
-    // yet is the externally-observable proxy that 60 ticks ran without error
-    // and without any spurious "correction" ever firing with no data at all.
+    for (let t = 1; t <= 60; t++) {
+      client.tick(mkIntent(0.2))
+      // The tick counter advances by exactly one per call - a loop that
+      // double-stepped, or stopped stepping after the first call (the Plan 1
+      // bug shape: a function that breaks on its second consecutive call),
+      // fails on the very next iteration rather than at the end.
+      expect(client.state().tick).toBe(t)
+    }
+
+    // 60 ticks (1s) of accel 1 actually moved the kart: a tick() that never
+    // called step(), or called it with a neutral intent instead of
+    // localIntent, leaves the kart on the grid and fails here.
+    const k = client.state().karts[OWN]
+    const moved = Math.hypot(k.position.x - startX, k.position.z - startZ)
+    expect(moved).toBeGreaterThan(1)
+    expect(Math.hypot(k.velocity.x, k.velocity.z)).toBeGreaterThan(0)
+    // Nothing was ever received, so nothing could legitimately have corrected.
     expect(client.corrections()).toBe(0)
+  })
+
+  it('state() is the live predicted state, not a snapshot taken at construction', () => {
+    const ctx = makeNetContext(false)
+    const pair = makeLossyPair({ latencyMs: 1, jitterMs: 0, lossRate: 0, seed: 1 })
+    const client = new ClientLoop(ctx, OWN, pair.a)
+
+    const first = client.state()
+    client.tick(mkIntent(0))
+    client.tick(mkIntent(0))
+    expect(client.state()).toBe(first)   // same object, identity not copy
+    expect(first.tick).toBe(2)           // and it was advanced in place
+    // Only this client's own seat is human; the other seven stay bot-driven,
+    // which is what makes step() legal without a partial-seat entry point.
+    expect(first.karts[OWN].isBot).toBe(false)
+    expect(first.karts[OWN].connected).toBe(true)
   })
 })
 
@@ -253,8 +357,11 @@ describe('ClientLoop — 30Hz input send with INPUT_REDUNDANCY', () => {
     const received: InputDatagram[] = []
     pair.b.onMessage((_peerId, channel, data) => {
       if (channel !== 'unreliable') return
+      // Dispatch on the shared header, exactly as AuthorityLoop does: this
+      // asserts, per message, that ClientLoop really tagged what it sent.
+      expect(decodeHeader(data).kind).toBe('input')
       const dg = makeInputDatagramTarget()
-      decodeInput(data, dg)
+      decodeInput(data.subarray(HEADER_BYTES), dg)
       received.push(dg)
     })
 
@@ -270,10 +377,14 @@ describe('ClientLoop — 30Hz input send with INPUT_REDUNDANCY', () => {
     expect(received[0].playerId).toBe(OWN)
     expect(received[0].intents.length).toBe(8)
     // newest-last: the datagram sent at tick 2 has its last slot's steer
-    // matching the intent passed at tick 2 (t*0.01 = 0.02).
-    expect(received[0].intents[7].steer).toBeCloseTo(0.02, 5)
+    // matching the intent passed at tick 2 (t*0.01 = 0.02), to within one
+    // quantisation step - encodeInput is lossy on steer by design.
+    expect(Math.abs(received[0].intents[7].steer - 0.02)).toBeLessThan(STEER_STEP)
     // the LAST datagram sent (at tick 20) has newest slot steer 0.20.
-    expect(received[9].intents[7].steer).toBeCloseTo(0.2, 5)
+    expect(Math.abs(received[9].intents[7].steer - 0.2)).toBeLessThan(STEER_STEP)
+    // and the window really slid: the two datagrams differ, so this is not
+    // eight copies of one value passing both checks by accident.
+    expect(received[9].intents[7].steer).toBeGreaterThan(received[0].intents[7].steer)
   })
 })
 ```
@@ -304,7 +415,7 @@ Create `packages/net/src/client.ts`:
 import type { AuthEvent, Intent, KartState, SimContext, SimState } from '@tapkart/sim'
 import { MAX_ENTITIES, MAX_KARTS, allocStateLike, cloneState, createState, makeIntentBuffer, step, wrapAngle } from '@tapkart/sim'
 import type { ChannelName, WireEntity, WireKart, WireSnapshot } from '@tapkart/protocol'
-import { EPS, INPUT_REDUNDANCY, decodeEvents, decodeSnapshot, encodeInput } from '@tapkart/protocol'
+import { EPS, INPUT_REDUNDANCY, decodeEvents, decodeHeader, decodeSnapshot, encodeHeader, encodeInput } from '@tapkart/protocol'
 import type { Transport } from './transport'
 import { applyEvent } from './apply'
 
@@ -315,8 +426,12 @@ const RING_CAPACITY = 128
 const INPUT_SEND_INTERVAL_TICKS = 2
 /** Generous fixed allocation, not a protocol-mandated size (see Task 14's
  * brief for the identical reasoning): an encoded input datagram is 8 small
- * intents plus a header, far under this. */
+ * intents plus the 2-byte message header, far under this. */
 const SEND_BUF_BYTES = 256
+/** encodeHeader writes tag + protocolVersion and returns 2 (locked contract
+ * §3). Declared here because protocol exports the writer, not the width, and
+ * every receive path needs the payload offset. */
+const HEADER_BYTES = 2
 
 /** No lobby/character-select wiring exists in this plan; see brief. */
 const ZERO_CHARACTER_IDX = [0, 0, 0, 0, 0, 0, 0, 0]
@@ -368,7 +483,7 @@ function ownKartDiverged(predicted: KartState, wire: WireKart): boolean {
   if (Math.abs(wrapAngle(predicted.heading - wire.heading)) > EPS.heading) return true
   if (Math.abs(predicted.angularVelocity - wire.angularVelocity) > EPS.angularVelocity) return true
   if (Math.abs(predicted.drift.charge - wire.driftCharge) > EPS.driftCharge) return true
-  if (Math.abs(predicted.lap.t - wire.t) > EPS.lapT) return true
+  if (Math.abs(predicted.lap.t - wire.t) > EPS.t) return true
   if (predicted.spinOutTicks !== wire.spinOutTicks) return true
   if (predicted.invulnTicks !== wire.invulnTicks) return true
   if (predicted.boostTicks !== wire.boostTicks) return true
@@ -464,6 +579,13 @@ export class ClientLoop {
     this.transport = t
 
     this.predicted = createState(this.ctx, 0, ZERO_CHARACTER_IDX)
+    // No 'start' handshake exists in this plan (contract §3 defines no codec
+    // for the lobby kinds), so this loop starts racing immediately rather than
+    // sitting out a countdown it can never be told has ended. CONSEQUENCE FOR
+    // CALLERS: any authority paired with a ClientLoop must have its own
+    // state.phase set to 'racing' too, or the authority freezes every kart for
+    // COUNTDOWN_TICKS (phase.ts's resolveInputs) while this side drives, and
+    // every snapshot in that window is a guaranteed correction.
     this.predicted.phase = 'racing'
     this.predicted.karts[playerId].isBot = false
     this.predicted.karts[playerId].connected = true
@@ -482,8 +604,17 @@ export class ClientLoop {
   }
 
   private onMessage(channel: ChannelName, data: Uint8Array): void {
-    if (channel === 'unreliable') {
-      decodeSnapshot(data, this.decodeTarget)
+    // Dispatch on the shared header (locked contract §3), never on the channel
+    // alone: a promoted ShadowLoop broadcasts snapshots and events on the same
+    // two channels the host used, and this client keeps its transport. Reading
+    // an events buffer as a snapshot because it happened to arrive on the
+    // channel a snapshot usually uses is the failure this header prevents.
+    // decodeHeader throws on an unknown tag or a version mismatch.
+    const kind = decodeHeader(data).kind
+    const payload = data.subarray(HEADER_BYTES)
+
+    if (kind === 'snapshot' && channel === 'unreliable') {
+      decodeSnapshot(payload, this.decodeTarget)
       if (this.decodeTarget.tick > this.highestSeenSnapshotTick) {
         this.highestSeenSnapshotTick = this.decodeTarget.tick
         this.pendingSnapshot = this.decodeTarget
@@ -491,17 +622,23 @@ export class ClientLoop {
       }
       return
     }
-    if (channel === 'reliable') {
+    if (kind === 'events' && channel === 'reliable') {
       // Applied the instant they arrive, not deferred to the next tick():
       // spec section 5, "the local kart's hit reaction plays on receipt, not
       // on prediction." See Task 13's brief for what applyEvent does per kind.
       this.decodedEvents.length = 0
-      decodeEvents(data, this.decodedEvents)
+      decodeEvents(payload, this.decodedEvents)
       for (const ev of this.decodedEvents) {
         applyEvent(this.ctx, this.predicted, ev)
         this.pendingAppliedEvents.push(ev)
       }
     }
+    // Every other kind - checkpoint, authorityChange, the lobby kinds - has no
+    // handler in this plan (contract §3 defines no codec for the lobby kinds,
+    // and client-side authority migration is a later plan's scope, spec §5's
+    // "clients swap transports"). Dropped deliberately, not silently: an
+    // unknown TAG still throws in decodeHeader above; a known kind this loop
+    // does not implement yet is simply ignored.
   }
 
   tick(localIntent: Intent): void {
@@ -529,8 +666,9 @@ export class ClientLoop {
       }
       copyIntentInto(this.sendWindow[this.sendWindow.length - 1], localIntent)
       this.sendWindow[this.sendWindow.length - 1].tick = this.predicted.tick
-      const n = encodeInput(this.sendBuf, this.playerId, this.sendWindow)
-      this.transport.broadcast('unreliable', this.sendBuf.slice(0, n))
+      const h = encodeHeader(this.sendBuf, 'input')
+      const n = encodeInput(this.sendBuf.subarray(h), this.playerId, this.sendWindow)
+      this.transport.broadcast('unreliable', this.sendBuf.slice(0, h + n))
     }
 
     if (this.pendingSnapshot !== null) {
@@ -540,9 +678,17 @@ export class ClientLoop {
   }
 
   /** Count of corrections since construction. The zero-corrections test's
-   * only instrument - see brief. */
+   * primary instrument - see brief. */
   corrections(): number {
     return this.correctionCount
+  }
+
+  /** The live predicted state, not a copy (locked contract §5: "read-only
+   * view; the convergence test asserts on it directly"). Callers must not
+   * mutate it: this loop reconciles against its own history, and an outside
+   * write would be reverted by the next correction without warning. */
+  state(): SimState {
+    return this.predicted
   }
 
   /**
@@ -609,7 +755,7 @@ export class ClientLoop {
 
 Run: `npx vitest run packages/net/test/client.test.ts`
 
-Expected: PASS — 2 tests.
+Expected: PASS — 3 tests.
 
 - [ ] **Step 5: Write the failing test — reconciliation, hard resync, and event application**
 
@@ -619,14 +765,38 @@ round needs, next to the existing ones:
 ```ts
 import type { AuthEvent } from '@tapkart/sim'
 import { createState as createSimState, step as simStep, makeIntentBuffer as makeSimIntentBuffer } from '@tapkart/sim'
-import { encodeEvents, encodeSnapshot } from '@tapkart/protocol'
+import { EPS, encodeEvents, encodeHeader, encodeSnapshot } from '@tapkart/protocol'
+import type { Transport } from '../src/transport'
 import { AuthorityLoop } from '../src/authority'
 ```
 
-and this shared constant, used by every test below:
+and this shared constant plus one helper, used by every test below:
 
 ```ts
 const CHARS8 = [0, 0, 0, 0, 0, 0, 0, 0]
+
+/**
+ * Counts the snapshots that actually reached this side of the pair.
+ *
+ * Registering a second listener alongside ClientLoop's own is legal and does
+ * not displace it: makeLoopbackPair (Task 12) keeps an array of callbacks per
+ * side and invokes every one of them (`messageCbs.push(cb)` in its `onMessage`,
+ * `for (const cb of cbs)` in its `pump`). Verified by reading Task 12's
+ * implementation, not assumed - a transport that kept only the last callback
+ * would silently unregister the code under test and every assertion after this
+ * point would be meaningless.
+ *
+ * This exists because "zero corrections" is also what a client that received
+ * NOTHING reports. Every zero-delta assertion below is paired with a floor on
+ * this counter.
+ */
+function countSnapshots(t: Transport): () => number {
+  let n = 0
+  t.onMessage((_peerId, channel, data) => {
+    if (channel === 'unreliable' && decodeHeader(data).kind === 'snapshot') n++
+  })
+  return () => n
+}
 ```
 
 Then append (this round drives a real `AuthorityLoop` for genuinely
@@ -646,6 +816,7 @@ describe('ClientLoop — reconciliation', () => {
     const pair = makeLossyPair({ latencyMs: 20, jitterMs: 5, lossRate: 0, seed: 3 })
     const authority = new AuthorityLoop(ctxA, state, pair.a)
     const ctxC = makeNetContext(false)
+    const snapshotsSeen = countSnapshots(pair.b)
     const client = new ClientLoop(ctxC, OWN, pair.b)
 
     let nowMs = 0
@@ -656,6 +827,7 @@ describe('ClientLoop — reconciliation', () => {
       nowMs += 1000 / 60
     }
     const baseline = client.corrections()
+    const snapshotsAtBaseline = snapshotsSeen()
     for (let t = 0; t < 120; t++) {
       authority.tick()
       client.tick(mkIntent(0.15))
@@ -664,6 +836,38 @@ describe('ClientLoop — reconciliation', () => {
     }
 
     expect(client.corrections() - baseline).toBe(0)
+    // Control: the measured window must contain real traffic. 120 ticks at one
+    // snapshot every 3 ticks is 40 broadcasts with lossRate 0; a floor of 30
+    // absorbs the latency shift at the window edges without absorbing silence.
+    expect(
+      snapshotsSeen() - snapshotsAtBaseline,
+      'no snapshots arrived in the measured window, so the zero above is vacuous',
+    ).toBeGreaterThanOrEqual(30)
+    // Control: converged means converged. The client's own kart really is
+    // where the authority says it is, rather than merely "took no
+    // corrections" - which a client that never compared anything also reports.
+    //
+    // The tolerance here is deliberately NOT EPS. Both loops are at the same
+    // tick number, but not at the same instant of information: the client's
+    // current tick is the authority's state at snap.tick replayed forward a
+    // few ticks. The epsilon-tight claim is about the comparison AT snap.tick,
+    // and the zero-corrections delta above is what asserts it. This assertion
+    // answers a different question - "is the client tracking the right kart in
+    // the right race at all" - where the failure mode is metres, not
+    // centimetres. Widening it does not weaken the epsilon invariant, and
+    // tightening it to EPS would make a correct implementation flaky.
+    const CONVERGED_BAND_M = 0.5
+    const CONVERGED_BAND_MS = 1.0
+    const mine = client.state().karts[OWN]
+    const theirs = authority.state().karts[OWN]
+    expect(Math.abs(mine.position.x - theirs.position.x)).toBeLessThan(CONVERGED_BAND_M)
+    expect(Math.abs(mine.position.z - theirs.position.z)).toBeLessThan(CONVERGED_BAND_M)
+    expect(Math.abs(mine.velocity.x - theirs.velocity.x)).toBeLessThan(CONVERGED_BAND_MS)
+    expect(Math.abs(mine.velocity.z - theirs.velocity.z)).toBeLessThan(CONVERGED_BAND_MS)
+    // Deliberately no equality assertion on lap/checkpointIdx: two karts half a
+    // metre apart can legitimately sit on opposite sides of a checkpoint line at
+    // one arbitrary instant, and a test that flakes on a correct implementation
+    // teaches the next reader to widen it.
   })
 
   it('a snapshot whose tick the ring cannot find (idx < 0) triggers a hard resync instead of throwing', () => {
@@ -691,9 +895,12 @@ describe('ClientLoop — reconciliation', () => {
     }
     expect(a.tick).toBe(500)
 
-    const buf = new Uint8Array(4096)
-    const n = encodeSnapshot(buf, a, new Array(8).fill(-1))
-    pair.b.broadcast('unreliable', buf.slice(0, n))
+    // Worst-case snapshot is 743 B (contract §4: 8x178 + 32x135 + 200 bits =
+    // 5944 bits); 1024 plus the 2-byte header is comfortable headroom.
+    const buf = new Uint8Array(1024)
+    const h = encodeHeader(buf, 'snapshot')
+    const n = encodeSnapshot(buf.subarray(h), a, new Array(8).fill(-1))
+    pair.b.broadcast('unreliable', buf.slice(0, h + n))
     // pump() only DELIVERS a message once nowMs has advanced past the
     // moment it was scheduled - the same schedule-then-deliver split a real
     // transport needs, so one call right after broadcast() never delivers
@@ -707,6 +914,19 @@ describe('ClientLoop — reconciliation', () => {
 
     expect(() => client.tick(mkIntent(0))).not.toThrow()
     expect(client.corrections()).toBeGreaterThan(0)
+    // And the resync actually landed. tick() steps first (tick 1 -> 2) and
+    // reconciles at the end of the same call, so hardResync's
+    // `predicted.tick = snap.tick` leaves the clock at exactly 500. Without
+    // hardResync the client would still be at tick 2 on the grid, having
+    // ignored a snapshot it could not place in its ring.
+    expect(client.state().tick).toBe(500)
+    // The kart carries the dequantised authoritative position, which is within
+    // one quantisation step of the source - and contract §4 guarantees every
+    // epsilon exceeds its own step, so EPS.position is the correct bound here
+    // rather than a hand-picked number.
+    expect(
+      Math.abs(client.state().karts[OWN].position.x - a.karts[OWN].position.x),
+    ).toBeLessThanOrEqual(EPS.position)
   })
 })
 ```
@@ -724,12 +944,16 @@ describe('ClientLoop — events applied immediately, not deferred', () => {
 
     for (let t = 0; t < 5; t++) client.tick(mkIntent(0))
 
+    expect(client.state().karts[OWN].item).toBe('none')
+    expect(client.state().nextEventSeq).toBe(0)
+
     const events: AuthEvent[] = [
       { eventSeq: 0, tick: 5, kind: 'itemGrant', playerId: OWN, entityId: -1, item: 'seeker', data: 0 },
     ]
     const buf = new Uint8Array(4096)
-    const n = encodeEvents(buf, events)
-    pair.b.broadcast('reliable', buf.slice(0, n))
+    const h = encodeHeader(buf, 'events')
+    const n = encodeEvents(buf.subarray(h), events)
+    pair.b.broadcast('reliable', buf.slice(0, h + n))
     let nowMs = 0
     for (let i = 0; i < 10; i++) {
       pair.pump(nowMs)
@@ -737,13 +961,21 @@ describe('ClientLoop — events applied immediately, not deferred', () => {
     }
 
     // applyEvent runs synchronously inside the onMessage callback fired by
-    // pump() above - by the time pump() returns, predicted.karts[OWN].item is
-    // already 'seeker', before any further tick() call. There is no direct
-    // accessor for predicted (locked constructor/tick/corrections only); the
-    // Step 12 integration test is what would show a permanent, non-converging
-    // 'item' mismatch correction if applyEvent were never actually called
-    // here - this test only confirms the receipt path runs without error.
-    expect(() => client.tick(mkIntent(0))).not.toThrow()
+    // pump() above, so by the time pump() returns the item is already there -
+    // before any further tick() call. That is the whole claim in this test's
+    // title, and state() (locked contract §5) is what makes it observable:
+    // an earlier draft of this test could only assert `not.toThrow()`, which a
+    // ClientLoop that dropped every reliable datagram on the floor also passes.
+    expect(client.state().karts[OWN].item).toBe('seeker')
+    expect(client.state().nextEventSeq).toBe(1)
+    // A follower's nextEventSeq advances ONLY by applying received events
+    // (contract §1b/§0), so this pair of assertions also proves the client
+    // never emitted one of its own during those five ticks.
+
+    // Still there after the next tick(): applying an event outside step() is
+    // only durable because step()'s cloneState(prev, next) carries it forward.
+    client.tick(mkIntent(0))
+    expect(client.state().karts[OWN].item).toBe('seeker')
   })
 })
 ```
@@ -765,13 +997,14 @@ already-complete code are coverage, not red. **Skip to Step 8.**
 
 Run: `npx vitest run packages/net/test/client.test.ts`
 
-Expected: PASS — 5 tests total (2 from Step 1, 2 reconciliation, 1 events).
+Expected: PASS — 6 tests total (3 from Step 1, 2 reconciliation, 1 events).
 
 - [ ] **Step 8: Write the failing test — `RemoteInterpolator`**
 
 Append to `packages/net/test/client.test.ts`:
 
 ```ts
+import type { WireKart } from '@tapkart/protocol'
 import { REMOTE_EXTRAPOLATE_CAP_MS, REMOTE_INTERP_DELAY_MS, RemoteInterpolator } from '../src/client'
 
 function mkRemoteKart(x: number, vx: number): WireKart {
@@ -850,11 +1083,15 @@ Append to `packages/net/src/client.ts`:
 // Remote karts and all world entities are never predicted (spec section 5):
 // buffered and rendered ~100ms in the past with interpolation, extrapolating
 // briefly with a hard cap when the buffer starves. This is deliberately
-// standalone, not wired into ClientLoop's tick()/onMessage() - see this
-// brief's "Produces" section for why: the locked ClientLoop constructor/tick/
-// corrections shape has no accessor to surface this data to a renderer, and
-// this task will not add one to a locked class. A later plan wires this to
-// the live WireSnapshot stream and to an actual scene graph.
+// standalone, not yet wired into ClientLoop's tick()/onMessage() - see this
+// brief's "Produces" section for why: nothing in ClientLoop's locked
+// four-member shape can surface interpolated remote samples to a renderer
+// (state() exposes the PREDICTED SimState, whose remote seats are exactly the
+// locally-simulated values spec section 5 says never to render), and this task
+// will not add a fifth member to a locked class. Step 14 below wires this
+// class's INPUT to ClientLoop's own incoming snapshot stream, through a free
+// function rather than a class member; a later plan wires its OUTPUT to an
+// actual renderer/scene graph.
 
 /** Spec section 5: "approximately 100ms in the past." Exact here. */
 export const REMOTE_INTERP_DELAY_MS = 100
@@ -931,9 +1168,265 @@ export class RemoteInterpolator {
 
 Run: `npx vitest run packages/net/test/client.test.ts`
 
-Expected: PASS — 9 tests total (5 + 4 RemoteInterpolator tests).
+Expected: PASS — 10 tests total (6 + 4 RemoteInterpolator tests).
 
-- [ ] **Step 12: Write the failing test — the flagship zero-corrections invariant, spec §8**
+- [ ] **Step 12: Write the failing test — wiring `RemoteInterpolator` to the incoming snapshot stream**
+
+`RemoteInterpolator` from Step 10 is fully implemented and tested standalone, but nothing feeds
+it: spec §5 requires remote karts to be "buffered and rendered approximately 100ms in the past
+with interpolation" from the live snapshot stream, and until this step `ClientLoop` decodes every
+incoming `WireSnapshot` only to reconcile its own kart against it (`reconcile`, above) — the other
+seven karts' wire data is read and then discarded. Wiring the feed itself (not a renderer, which
+does not exist in this plan — see the Produces section above) is this task's own scope, per this
+brief's residual-findings pass.
+
+Append to `packages/net/test/client.test.ts`. First widen the `@tapkart/sim` import used by the
+reconciliation tests (added in Step 5) to add `MAX_KARTS`. Before:
+
+```ts
+import { createState as createSimState, step as simStep, makeIntentBuffer as makeSimIntentBuffer } from '@tapkart/sim'
+```
+
+After:
+
+```ts
+import { MAX_KARTS, createState as createSimState, step as simStep, makeIntentBuffer as makeSimIntentBuffer } from '@tapkart/sim'
+```
+
+Then widen the `RemoteInterpolator` import added in Step 8 to add `remoteInterpolatorOf`. Before:
+
+```ts
+import { REMOTE_EXTRAPOLATE_CAP_MS, REMOTE_INTERP_DELAY_MS, RemoteInterpolator } from '../src/client'
+```
+
+After:
+
+```ts
+import { REMOTE_EXTRAPOLATE_CAP_MS, REMOTE_INTERP_DELAY_MS, RemoteInterpolator, remoteInterpolatorOf } from '../src/client'
+```
+
+Then append a new `describe` block, after `describe('RemoteInterpolator', ...)`'s closing `})`:
+
+```ts
+describe('ClientLoop — RemoteInterpolator wiring', () => {
+  it('feeds the incoming snapshot stream into its RemoteInterpolator, keyed by receipt tick', () => {
+    const ctxA = makeNetContext(true)
+    const state = createSimState(ctxA, 0, CHARS8)
+    state.phase = 'racing'
+    state.karts[OWN].isBot = false
+    state.karts[OWN].connected = true
+
+    const pair = makeLossyPair({ latencyMs: 1, jitterMs: 0, lossRate: 0, seed: 7 })
+    const authority = new AuthorityLoop(ctxA, state, pair.a)
+    const ctxC = makeNetContext(false)
+    const client = new ClientLoop(ctxC, OWN, pair.b)
+
+    // A remote seat's kart: bot-driven on the authority, real physics in
+    // ClientLoop's own predicted SimState but never trusted or rendered from
+    // there (see this brief's design section). Its only path into anything
+    // this test can observe is the wire, through the wiring this step adds.
+    const REMOTE_SEAT = (OWN + 1) % MAX_KARTS
+
+    let nowMs = 0
+    for (let t = 0; t < 30; t++) {
+      authority.tick()
+      client.tick(mkIntent(0))
+      pair.pump(nowMs)
+      nowMs += 1000 / 60
+    }
+
+    // Before anything is ever pushed, RemoteInterpolator.sampleKart returns
+    // null (its own "returns null before anything has been pushed" test,
+    // above) - so a non-null result here is only possible if at least one
+    // snapshot's karts array actually reached this interpolator.
+    const sample = remoteInterpolatorOf(client).sampleKart(REMOTE_SEAT, client.state().tick * (1000 / 60))
+    expect(sample).not.toBeNull()
+    // And it is real data, not a degenerate {0,0,0}: every shipped track's
+    // grid start is off-origin (Plan 1's oval places seat 0 at
+    // (-200, ., -100)), so a wired-through remote kart is nowhere near the
+    // origin either.
+    expect(Math.abs(sample!.position.x) + Math.abs(sample!.position.z)).toBeGreaterThan(1)
+  })
+})
+```
+
+- [ ] **Step 13: Run the test to verify it fails**
+
+Run: `npx vitest run packages/net/test/client.test.ts`
+
+Expected: FAIL. `client.ts` already exports `ClientLoop` and `RemoteInterpolator` (Steps 3 and
+10), but not `remoteInterpolatorOf` — a missing named runtime export binds to `undefined` at the
+call site (this repo's established pattern for a missing named value export, e.g. Task 1's
+`TypeError: resetBotHold is not a function`, Task 3's `TypeError: encodeHeader is not a function`),
+so this fails as a plain call, not a constructor call (contrast Step 9's
+`TypeError: RemoteInterpolator is not a constructor`):
+
+```
+TypeError: remoteInterpolatorOf is not a function
+ ❯ packages/net/test/client.test.ts:<line>
+```
+
+- [ ] **Step 14: Wire `RemoteInterpolator` into `ClientLoop`'s snapshot receipt path**
+
+Five edits to `packages/net/src/client.ts`.
+
+First, widen the `@tapkart/sim` import at the top of the file to add `TICK_HZ`. Before:
+
+```ts
+import { MAX_ENTITIES, MAX_KARTS, allocStateLike, cloneState, createState, makeIntentBuffer, step, wrapAngle } from '@tapkart/sim'
+```
+
+After:
+
+```ts
+import { MAX_ENTITIES, MAX_KARTS, TICK_HZ, allocStateLike, cloneState, createState, makeIntentBuffer, step, wrapAngle } from '@tapkart/sim'
+```
+
+Second, add a clock constant and a clone helper near the file's other small helpers, right after
+`copyIntentInto` and before `makeWireSnapshotTarget`:
+
+```ts
+/** Milliseconds per sim tick at the fixed 60Hz rate (TICK_HZ, @tapkart/sim). Used
+ * only to timestamp RemoteInterpolator keyframes - no Date.now() call anywhere in
+ * this file, matching contract §0's "ticks only" convention; this loop's own tick
+ * counter already advances in lockstep with real time under normal play. */
+const TICK_MS = 1000 / TICK_HZ
+
+/** RemoteInterpolator retains keyframes across many tick()s. A pushed karts array
+ * must be this loop's own copy: `decodeTarget` is one of two ping-ponged scratch
+ * buffers (this brief's verification note, finding 2) that a later decode
+ * overwrites in place, and a keyframe holding a reference into it would
+ * silently corrupt already-buffered history the moment the next snapshot
+ * arrives. */
+function cloneWireKarts(karts: WireKart[]): WireKart[] {
+  return karts.map((k) => ({ ...k, position: { ...k.position }, velocity: { ...k.velocity } }))
+}
+```
+
+Third, in `ClientLoop`'s `onMessage`, push into the interpolator right after a snapshot is accepted
+as newer than anything seen so far — before the ping-pong buffer is swapped, while
+`this.decodeTarget` still refers to the buffer that was just decoded into. Before:
+
+```ts
+    if (kind === 'snapshot' && channel === 'unreliable') {
+      decodeSnapshot(payload, this.decodeTarget)
+      if (this.decodeTarget.tick > this.highestSeenSnapshotTick) {
+        this.highestSeenSnapshotTick = this.decodeTarget.tick
+        this.pendingSnapshot = this.decodeTarget
+        this.decodeTarget = this.decodeTarget === this.decodeScratchA ? this.decodeScratchB : this.decodeScratchA
+      }
+      return
+    }
+```
+
+After:
+
+```ts
+    if (kind === 'snapshot' && channel === 'unreliable') {
+      decodeSnapshot(payload, this.decodeTarget)
+      if (this.decodeTarget.tick > this.highestSeenSnapshotTick) {
+        this.highestSeenSnapshotTick = this.decodeTarget.tick
+        // Every remote kart's wire data, not just this client's own seat -
+        // spec §5's "buffered and rendered ~100ms in the past" requirement
+        // (this brief's Produces section, RemoteInterpolator). Timestamped by
+        // this loop's own tick counter, not a wall-clock read (see TICK_MS).
+        this.remoteInterp.push({ recvAtMs: this.predicted.tick * TICK_MS, karts: cloneWireKarts(this.decodeTarget.karts) })
+        this.pendingSnapshot = this.decodeTarget
+        this.decodeTarget = this.decodeTarget === this.decodeScratchA ? this.decodeScratchB : this.decodeScratchA
+      }
+      return
+    }
+```
+
+Fourth, add the `remoteInterp` field to `ClientLoop`, construct it, and register the instance for
+the free function below. In the class field declarations, after `private correctionCount = 0`:
+
+```ts
+  private correctionCount = 0
+  private readonly remoteInterp = new RemoteInterpolator()
+```
+
+And after the constructor body's existing last line, register the instance so
+`remoteInterpolatorOf` can reach it:
+
+```ts
+    t.onMessage((_peerId, channel, data) => this.onMessage(channel, data))
+    remoteInterpolators.set(this, this.remoteInterp)
+```
+
+`RemoteInterpolator` is declared later in this same file (Step 10), which is safe here:
+`ClientLoop`'s constructor body only *runs* the first time `new ClientLoop(...)` is called, by
+which point the whole module — including the `RemoteInterpolator` class declaration below — has
+already finished executing. JavaScript's per-module, top-to-bottom evaluation order guarantees
+this; nothing in this class is invoked at module-evaluation time, only referenced inside function
+bodies that run later.
+
+Finally, add the `WeakMap` and the free function immediately above the `RemoteInterpolator` class
+(Step 10's block), since that is the first point in the file both `ClientLoop` and
+`RemoteInterpolator` are in scope together:
+
+```ts
+/**
+ * Per-instance access to a ClientLoop's RemoteInterpolator without adding a fifth
+ * member to the locked four-member class (contract §5 fixes ClientLoop's shape
+ * exactly: constructor, tick, corrections, state - "no task may... add fields to
+ * anything below"). A free function reading a WeakMap is the same "define what you
+ * need in your own files" allowance this task already used for RemoteInterpolator
+ * itself; it adds nothing to ClientLoop's own public surface.
+ */
+const remoteInterpolators = new WeakMap<ClientLoop, RemoteInterpolator>()
+
+/** Throws rather than returning undefined: every ClientLoop registers itself in its
+ * own constructor, so a missing entry means a caller passed something this module
+ * never actually constructed. */
+export function remoteInterpolatorOf(client: ClientLoop): RemoteInterpolator {
+  const ri = remoteInterpolators.get(client)
+  if (!ri) throw new Error('remoteInterpolatorOf: not a ClientLoop instance')
+  return ri
+}
+```
+
+Fifth, update Step 10's `RemoteInterpolator` section comment now that it is no longer accurate — the class is wired as of this step. Before:
+
+```ts
+// Remote karts and all world entities are never predicted (spec section 5):
+// buffered and rendered ~100ms in the past with interpolation, extrapolating
+// briefly with a hard cap when the buffer starves. This is deliberately
+// standalone, not yet wired into ClientLoop's tick()/onMessage() - see this
+// brief's "Produces" section for why: nothing in ClientLoop's locked
+// four-member shape can surface interpolated remote samples to a renderer
+// (state() exposes the PREDICTED SimState, whose remote seats are exactly the
+// locally-simulated values spec section 5 says never to render), and this task
+// will not add a fifth member to a locked class. Step 14 below wires this
+// class's INPUT to ClientLoop's own incoming snapshot stream, through a free
+// function rather than a class member; a later plan wires its OUTPUT to an
+// actual renderer/scene graph.
+```
+
+After:
+
+```ts
+// Remote karts and all world entities are never predicted (spec section 5):
+// buffered and rendered ~100ms in the past with interpolation, extrapolating
+// briefly with a hard cap when the buffer starves. The class itself is
+// standalone on purpose - nothing in ClientLoop's locked four-member shape
+// can surface interpolated remote samples to a renderer (state() exposes the
+// PREDICTED SimState, whose remote seats are exactly the locally-simulated
+// values spec section 5 says never to render), and this task will not add a
+// fifth member to a locked class. Its INPUT is wired, though: onMessage's
+// 'snapshot' branch above pushes every accepted snapshot in here, and
+// remoteInterpolatorOf (just below) is the free-function accessor a later
+// plan's renderer reads from. That renderer, and the OUTPUT half of wiring
+// this to an actual scene graph, remains a later plan's job.
+```
+
+- [ ] **Step 15: Run the test to verify it passes**
+
+Run: `npx vitest run packages/net/test/client.test.ts`
+
+Expected: PASS — 11 tests total (10 from Steps 1–11, plus the wiring test).
+
+- [ ] **Step 16: Write the failing test — the flagship zero-corrections invariant, spec §8**
 
 Append to `packages/net/test/client.test.ts`:
 
@@ -961,6 +1454,7 @@ describe('ClientLoop — the zero-corrections invariant (spec section 8)', () =>
     const pair = makeLossyPair({}) // contract default: 150ms latency, 50ms jitter, 5% loss, seed 0xC0FFEE
     const authority = new AuthorityLoop(ctxA, state, pair.a)
     const ctxC = makeNetContext(false)
+    const snapshotsSeen = countSnapshots(pair.b)
     const client = new ClientLoop(ctxC, OWN, pair.b)
 
     // A HELD-STEADY intent, not a continuously varying one: with a changing
@@ -987,6 +1481,7 @@ describe('ClientLoop — the zero-corrections invariant (spec section 8)', () =>
       nowMs += 1000 / 60
     }
     const baseline = client.corrections()
+    const snapshotsAtBaseline = snapshotsSeen()
 
     for (let t = 0; t < STEADY_TICKS; t++) {
       authority.tick()
@@ -996,15 +1491,41 @@ describe('ClientLoop — the zero-corrections invariant (spec section 8)', () =>
     }
 
     expect(client.corrections() - baseline).toBe(0)
+
+    // The two controls without which the zero above proves nothing.
+    //
+    // 1. Snapshots really arrived in the measured window. 600 ticks at one
+    //    broadcast every 3 ticks is 200, thinned by the default 5% loss to
+    //    ~190 expected; a floor of 140 (70% of expectation) is far below any
+    //    plausible run and far above the silence a broken transport produces.
+    //    A client that received nothing also reports zero corrections, and
+    //    that is precisely the failure this test existed to catch.
+    const steadySnapshots = snapshotsSeen() - snapshotsAtBaseline
+    expect(
+      steadySnapshots,
+      `only ${steadySnapshots} snapshots reached the client in the steady window; a count near zero means the transport delivered nothing and the zero-corrections assertion is vacuous, not a pass`,
+    ).toBeGreaterThanOrEqual(140)
+
+    // 2. The client is still on the same kart in the same race. See the
+    //    reconciliation test above for why this band is not EPS: the epsilon
+    //    claim is about the comparison at snap.tick, which the zero above
+    //    already asserts, and both loops here are the same tick number but not
+    //    the same instant of information.
+    const mine = client.state().karts[OWN]
+    const theirs = authority.state().karts[OWN]
+    expect(Math.abs(mine.position.x - theirs.position.x)).toBeLessThan(0.5)
+    expect(Math.abs(mine.position.z - theirs.position.z)).toBeLessThan(0.5)
+    expect(Math.abs(mine.velocity.x - theirs.velocity.x)).toBeLessThan(1.0)
+    expect(Math.abs(mine.velocity.z - theirs.velocity.z)).toBeLessThan(1.0)
   }, 30000)
 })
 ```
 
-- [ ] **Step 13: Run the test to verify it passes**
+- [ ] **Step 17: Run the test to verify it passes**
 
 Run: `npx vitest run packages/net/test/client.test.ts`
 
-Expected: PASS — 10 tests total, this one taking under a second of wall-clock
+Expected: PASS — 12 tests total, this one taking under a second of wall-clock
 time despite simulating 960 ticks (16s of race time) — `pump()` advances a
 caller-supplied `nowMs`, there is no real sleeping. This test was run, with
 this exact implementation, against real `packages/sim` and a functional
@@ -1017,14 +1538,14 @@ anchor silently reverted to `lastProcessedInputTick` (re-read this brief's
 verification note item 1, do not revert it back), or the decode target lost
 its ping-pong double-buffering (item 2).
 
-- [ ] **Step 14: Typecheck and run the full net suite**
+- [ ] **Step 18: Typecheck and run the full net suite**
 
 Run: `npx tsc --noEmit -p packages/net/tsconfig.json && npx vitest run packages/net`
 
-Expected: PASS, zero type errors, every `net` test green (this task's 10 plus
+Expected: PASS, zero type errors, every `net` test green (this task's 12 plus
 Tasks 11–14's).
 
-- [ ] **Step 15: Commit**
+- [ ] **Step 19: Commit**
 
 ```bash
 git add packages/net/src/client.ts packages/net/test/client.test.ts
@@ -1054,14 +1575,27 @@ never clobber an already-pending fresher one (ping-ponged decode
 targets), and events applied outside step() must be replayed again
 during reconciliation or a granted item silently reverts.
 
-corrections() is the zero-corrections test's only instrument. Granted
+corrections() is the zero-corrections test's instrument; state() is the
+locked contract's read-only view of the predicted SimState, which is
+what lets the same tests assert convergence positively instead of
+inferring it from a counter that a dead transport also zeroes. Every
+datagram carries protocol's shared 2-byte header: input goes out
+through encodeHeader, and onMessage dispatches on decodeHeader(data).kind
+rather than assuming everything unreliable is a snapshot. Granted
 items and other authoritative events are applied to the local kart the
 instant they arrive, never predicted - spec section 5, 'the local
 kart's hit reaction plays on receipt, not on prediction.'
 
-RemoteInterpolator ships standalone (100ms render delay, 8-keyframe
-buffer, 200ms extrapolation cap): remote karts and entities are never
-predicted, but ClientLoop's locked constructor/tick/corrections shape
-has no accessor to wire it to a renderer - that plumbing is a later
-plan's job."
+RemoteInterpolator (100ms render delay, 8-keyframe buffer, 200ms
+extrapolation cap) is now wired to ClientLoop's own incoming snapshot
+stream: onMessage pushes every newly-accepted snapshot's karts into it,
+timestamped by this loop's own tick counter (no Date.now() anywhere in
+this file). Remote karts and entities are never predicted; they were
+previously interpolated in isolation with nothing feeding them.
+remoteInterpolatorOf(client), a free function backed by a private
+WeakMap, is the accessor - not a fifth method on ClientLoop, which
+contract §5 locks at exactly four members. Wiring the *output* to an
+actual renderer remains a later plan's job (render/game does not exist
+in this repo yet); wiring the *input*, which needed nothing outside
+this package, is this commit's."
 ```

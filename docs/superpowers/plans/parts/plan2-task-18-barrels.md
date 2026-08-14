@@ -1,25 +1,35 @@
 ### Task 18: Public barrel exports for `packages/protocol` and `packages/net`
 
 **Files:**
-- Create: `packages/protocol/src/index.ts`
+- Widen: `packages/protocol/src/index.ts` *(created by Task 3, widened by each codec task)*
 - Test: `packages/protocol/test/barrel.test.ts`
-- Create: `packages/net/src/index.ts`
+- Widen: `packages/net/src/index.ts` *(created by Task 11)*
 - Test: `packages/net/test/barrel.test.ts`
 
-**Why two packages in one task.** The locked contract assigns both `packages/protocol/src/index.ts`
-(§3) and `packages/net/src/index.ts`(§5) to Task 18 — the same task number, landing dead last in
-Plan 2's sequence, after every other `protocol` and `net` task. This is why Tasks 3–17, including
-this plan's own Tasks 16–17, cross-import `protocol`'s modules by relative path
-(`../../protocol/src/<module>`) instead of `@tapkart/protocol`: the bare specifier resolves only to
-whatever `packages/protocol/package.json`'s `"exports"` map points `"."` at, and until this task
-runs that file exports nothing beyond what an earlier task may have stubbed. This task closes that
-gap for both packages at once, exactly as Plan 1's Task 18 did for `@tapkart/sim`. It adds no new
-behaviour and changes no signature.
+**Why two packages in one task, and why "widen" rather than "create".** Contract §3's module map
+labels `packages/protocol/src/index.ts` **`[Task 3 creates, Task 18 widens]`**, and its prose is
+explicit: *"The barrel exists from Task 3, not Task 18. Task 3's scaffold creates
+`packages/protocol/src/index.ts` already re-exporting `./types`, exactly as Plan 1's Task 2 did for
+`@tapkart/sim`; Task 18 widens it to every module and adds the no-ambiguous-export test."* §3
+applies the same rule to `net`: *"Task 11's scaffold creates it re-exporting `./transport`, Task 18
+widens it."*
 
-**Assumption stated up front, since neither file's scaffolding task is this one:** this task assumes
+An earlier draft of this brief assumed the opposite — that neither package was reachable by its bare
+specifier until this task ran — and used that assumption to justify every `net` task importing
+`protocol` by relative path. Contract §3 forbids that by name: a relative path *"punches through the
+package boundary, bypasses the `exports` map, and would survive into Plan 3."* **`net` imports
+`@tapkart/protocol`, always**, from Task 11 onward. Nothing in this task's own output changes as a
+result — the finished barrels are the same seven and six lines either way — but two of its RED steps
+predicted the wrong failure, and both are corrected below.
+
+This task therefore: appends the remaining `export *` lines to two files that already exist, and
+adds the two barrel test files, which are the only *new* files it creates. It adds no behaviour and
+changes no signature.
+
+**Assumption stated up front, since neither `index.ts` is created here:** this task assumes
 `packages/protocol/package.json` and `packages/net/package.json` already exist (created by Tasks 3
 and 11 respectively) with `"exports": { ".": "./src/index.ts" }`, mirroring
-`packages/sim/package.json` exactly. If either is missing that field, Step 5 or Step 13 below (the
+`packages/sim/package.json` exactly. If either is missing that field, Step 5 or Step 10 below (the
 "resolves through the package entry point" test) fails with a Node resolution error naming the
 package, not a missing-export error — that is the tell that this assumption, not this task's own
 code, is what needs fixing.
@@ -36,23 +46,29 @@ code, is what needs fixing.
    `transport.ts` has nothing runtime at all, and this task's "exports a function from every module"
    test list does not include an entry for it, exactly as Plan 1's excluded `types` from its own list
    for the same underlying reason.
-3. **`packages/protocol/src/types.ts` (Task 3) exports exactly one runtime value, `PROTOCOL_VERSION`
-   — a constant, not a function.** Everything else in that file (`ChannelName`, `MessageKind`,
-   `WireHeader`, `WireKart`, `WireEntity`, `WireSnapshot`, `InputDatagram`) is a type. The barrel test
-   below covers `PROTOCOL_VERSION` in its constants check, not its function list, matching Plan 1's
-   treatment of `sim`'s `types.ts`.
+3. **`packages/protocol/src/types.ts` (Task 3) exports four runtime values:** the constants
+   `PROTOCOL_VERSION` and `WIRE_TAG`, and the functions `encodeHeader` and `decodeHeader`
+   (contract §3). Everything else in that file (`ChannelName`, `MessageKind`, `WireHeader`,
+   `WireKart`, `WireEntity`, `WireSnapshot`, `InputDatagram`) is a type. The barrel test below
+   covers the two constants in its constants check and the two functions in its function list —
+   unlike Plan 1's `sim/types.ts`, which had no functions at all, this module does.
 4. No two `src` modules in either package export the same name, so no `export *` is ambiguous. As in
    Plan 1, this is asserted at runtime rather than trusted: an ambiguous star-export is silently
    dropped from the ESM namespace and importing it by name is a `SyntaxError`.
 5. Test fixtures (`packages/net/test/fixtures/net-fixtures.ts`, Task 12) live under `test/`, never
    under `src/`, so neither barrel can leak `makeNetContext`/`makeLossyPair` into the public surface.
    Both barrel tests assert this directly.
-6. The barrel imports every module; no module imports its own package's barrel. Adding it therefore
-   creates no import cycle in either package. (Cross-package imports — `net` reaching into
-   `protocol/src/*` by relative path, per this task's opening paragraph — are unaffected by this
-   task and remain relative even after this task ships; nothing in Tasks 11–17 needs to be rewritten
-   to use `@tapkart/protocol` now that it exists, and this task does not touch any file outside the
-   two `index.ts` files and their two test files.)
+6. The barrel imports every module; no module imports its own package's barrel. Widening it
+   therefore creates no import cycle in either package. Cross-package imports are already
+   `@tapkart/protocol` everywhere in `net` (contract §3, from Task 11 onward), so this task rewrites
+   nothing in Tasks 11–17 and touches no file outside the two `index.ts` files and their two test
+   files.
+7. **The ambiguity scan below builds its expected namespace map from direct per-module imports
+   (`import * as bitsNs from '../src/bits'`), never from the barrel.** This is not a style choice.
+   An ambiguous `export *` is silently *dropped* from the ESM namespace object, so a check that
+   derived its expectations from the barrel would be inspecting evidence the ambiguity has already
+   destroyed — it would report "no clashes" precisely when there is one. The per-module namespaces
+   are the only place the two colliding names both still exist.
 
 **Interfaces:**
 
@@ -61,6 +77,11 @@ Consumes — every `src` module in both packages, by the exact names the locked 
 ```ts
 // packages/protocol/src/types.ts                              [Task 3]
 export const PROTOCOL_VERSION = 1
+export const WIRE_TAG: { readonly [K in MessageKind]: number }   // input 0x10, snapshot 0x11,
+                                                                 // events 0x12, checkpoint 0x13,
+                                                                 // authorityChange 0x20, ...
+export function encodeHeader(out: Uint8Array, kind: MessageKind): number
+export function decodeHeader(buf: Uint8Array): WireHeader
 // plus types only: ChannelName, MessageKind, WireHeader, WireKart, WireEntity, WireSnapshot, InputDatagram
 
 // packages/protocol/src/bits.ts                                [Task 4]
@@ -100,20 +121,17 @@ export function makeLoopbackPair(opts: LoopbackOptions): { a: Transport; b: Tran
 export function applyEvent(ctx: SimContext, state: SimState, ev: AuthEvent): boolean
 
 // packages/net/src/authority.ts                                [Task 14]
-export class AuthorityLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(): void }
+export class AuthorityLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(): void; state(): SimState }
 
 // packages/net/src/client.ts                                   [Task 15]
-export class ClientLoop { constructor(ctx: SimContext, playerId: number, t: Transport); tick(localIntent: Intent): void; corrections(): number }
+export class ClientLoop { constructor(ctx: SimContext, playerId: number, t: Transport); tick(localIntent: Intent): void; corrections(): number; state(): SimState }
 
 // packages/net/src/shadow.ts                                   [Task 16, this plan]
+// No WIRE_TAG_* constants: the message header is protocol's (contract §3), and
+// shadow.ts's own HEADER_BYTES is private.
 export const HOST_TIMEOUT_TICKS = 90
 export const SNAPSHOT_PERIOD_TICKS = 3
 export const SHADOW_HISTORY_TICKS = 24
-export const WIRE_TAG_INPUT = 4
-export const WIRE_TAG_SNAPSHOT = 5
-export const WIRE_TAG_EVENTS = 6
-export const WIRE_TAG_CHECKPOINT = 7
-export const WIRE_TAG_AUTHORITY_CHANGE = 8
 export const AUTHORITY_CHANGE_BYTES = 10
 export function encodeAuthorityChange(out: Uint8Array, tick: number, eventSeq: number): number
 export function decodeAuthorityChange(buf: Uint8Array): { tick: number; eventSeq: number }
@@ -151,6 +169,9 @@ import * as protocol from '../src/index'
 import {
   // types [Task 3]
   PROTOCOL_VERSION,
+  WIRE_TAG,
+  decodeHeader,
+  encodeHeader,
   // bits [Task 4]
   BitReader,
   BitWriter,
@@ -208,6 +229,8 @@ const NAMESPACES: [string, object][] = [
 describe('@tapkart/protocol barrel', () => {
   it('exports a named function or class from every module that has one', () => {
     const fns: [string, unknown][] = [
+      ['types.encodeHeader', encodeHeader],
+      ['types.decodeHeader', decodeHeader],
       ['bits.BitWriter', BitWriter],
       ['bits.BitReader', BitReader],
       ['quant.quantStep', quantStep],
@@ -221,10 +244,11 @@ describe('@tapkart/protocol barrel', () => {
       ['input.encodeInput', encodeInput],
       ['input.decodeInput', decodeInput],
     ]
-    // 12 functions/classes across 6 of the 7 modules. The seventh, `types`, exports only
-    // PROTOCOL_VERSION (a constant) and types; the constants test below covers it.
-    // 2 bits + 1 quant + 3 snapshot + 2 checkpoint + 2 events + 2 input = 12.
-    expect(fns).toHaveLength(12)
+    // 14 functions/classes across all 7 modules. types contributes the two header
+    // functions (contract §3) on top of its two constants, which the constants
+    // test below covers.
+    // 2 types + 2 bits + 1 quant + 3 snapshot + 2 checkpoint + 2 events + 2 input = 14.
+    expect(fns).toHaveLength(14)
     for (const [name, fn] of fns) {
       expect(typeof fn, `${name} did not come through the barrel as a function`).toBe('function')
     }
@@ -233,6 +257,18 @@ describe('@tapkart/protocol barrel', () => {
   it('carries the contract constants through unchanged', () => {
     expect(PROTOCOL_VERSION).toBe(1)
     expect(INPUT_REDUNDANCY).toBe(8)
+    // The shared wire tags, by the exact values contract §3 fixes. Every net
+    // loop dispatches on these, so a barrel that forwarded a stale copy would
+    // desynchronise host, client and shadow with no other symptom.
+    expect(WIRE_TAG.input).toBe(0x10)
+    expect(WIRE_TAG.snapshot).toBe(0x11)
+    expect(WIRE_TAG.events).toBe(0x12)
+    expect(WIRE_TAG.checkpoint).toBe(0x13)
+    expect(WIRE_TAG.authorityChange).toBe(0x20)
+    // ...and a header written through the barrel reads back through it.
+    const hdr = new Uint8Array(2)
+    expect(encodeHeader(hdr, 'snapshot')).toBe(2)
+    expect(decodeHeader(hdr)).toEqual({ kind: 'snapshot', protocolVersion: PROTOCOL_VERSION })
     // Q and EPS's exact internal shape belongs to Task 5, not this task: only existence, frozen-ness
     // and object-ness are asserted here.
     expect(Q).toBeTruthy()
@@ -302,23 +338,34 @@ describe('@tapkart/protocol barrel', () => {
 - [ ] **Step 2: Run the test and confirm the RED**
 
 Run: `npx vitest run packages/protocol/test/barrel.test.ts`
-Expected: FAIL — the file cannot be collected, because `src/index.ts` does not exist yet:
-`Failed to resolve import "../src/index" from "packages/protocol/test/barrel.test.ts"`. (If Tasks
-3–10 have not landed yet in this working tree either, the failure instead names the first missing
-module import, e.g. `../src/bits` — that names a real gap in an earlier task, not this one.)
 
-- [ ] **Step 3: Write the barrel**
+Expected: FAIL — but **not** a resolution failure. `packages/protocol/src/index.ts` exists from Task
+3, and each codec task appended its own line to it, so the specifier resolves; what fails is a name
+the barrel does not carry. Under Vitest's esbuild transform a missing named export binds to
+`undefined`, so the first assertion to touch one throws at the call site:
 
-Create `packages/protocol/src/index.ts`:
+```
+TypeError: encodeHeader is not a function
+```
+
+If the barrel happens to be complete already (every codec task appended its line), this step is
+green and there is nothing to do in Step 3 — say so and move on rather than manufacturing a red.
+(If the failure is instead `Failed to resolve import "../src/index"`, Task 3's scaffold did not
+create the file: that is a real gap in Task 3, not in this task, and contract §3 says whose it is.)
+
+- [ ] **Step 3: Widen the barrel to every module**
+
+Bring `packages/protocol/src/index.ts` to exactly this content — appending whichever
+`export * from` lines are not already there, in this order:
 
 ```typescript
 // Public barrel for @tapkart/protocol.
 //
 // packages/protocol/package.json maps "." to this file, so this list IS the package's public
-// surface. `net`'s Tasks 11-17 (including this plan's Task 16/17) do NOT use this barrel — it did
-// not exist yet when they were written, so they import protocol's modules by relative path instead.
-// This barrel exists for code written after this task: any future protocol consumer, and any
-// refactor of net's own relative imports into `@tapkart/protocol` should it ever be worth doing.
+// surface. Task 3 created it re-exporting ./types and each codec task appended its own line as its
+// final step, which is what lets `net` import @tapkart/protocol from Task 11 onward (contract SS3:
+// "net imports @tapkart/protocol, always"). This task widens it to the full seven and adds the
+// tests that keep it honest.
 //
 // Ordered as the locked contract's SS3 module map lists them. `export *` carries types and values
 // together and is legal under isolatedModules; no two modules below export the same name, so no
@@ -370,6 +417,9 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+// Top-level ESM import, not `require('@tapkart/sim')`: every package here sets
+// "type": "module" and Vitest transforms to ESM, where `require` is undefined.
+import { createState } from '@tapkart/sim'
 import * as net from '../src/index'
 import {
   // loopback [Task 12]
@@ -386,11 +436,6 @@ import {
   SHADOW_HISTORY_TICKS,
   SNAPSHOT_PERIOD_TICKS,
   ShadowLoop,
-  WIRE_TAG_AUTHORITY_CHANGE,
-  WIRE_TAG_CHECKPOINT,
-  WIRE_TAG_EVENTS,
-  WIRE_TAG_INPUT,
-  WIRE_TAG_SNAPSHOT,
   decodeAuthorityChange,
   encodeAuthorityChange,
 } from '../src/index'
@@ -447,8 +492,10 @@ describe('@tapkart/net barrel', () => {
     expect(HOST_TIMEOUT_TICKS).toBe(90)
     expect(SNAPSHOT_PERIOD_TICKS).toBe(3)
     expect(SHADOW_HISTORY_TICKS).toBe(24)
-    expect(AUTHORITY_CHANGE_BYTES).toBe(10)
-    expect([WIRE_TAG_INPUT, WIRE_TAG_SNAPSHOT, WIRE_TAG_EVENTS, WIRE_TAG_CHECKPOINT, WIRE_TAG_AUTHORITY_CHANGE]).toEqual([4, 5, 6, 7, 8])
+    expect(AUTHORITY_CHANGE_BYTES).toBe(10) // 2-byte shared header + two u32s
+    // No WIRE_TAG_* here: the message tags belong to @tapkart/protocol (contract
+    // §3). An earlier draft of this test asserted a private [4,5,6,7,8] scheme
+    // that shadow.ts defined and no other loop in the plan ever wrote or read.
   })
 
   it("re-exports each module's own binding, not a copy", () => {
@@ -499,7 +546,6 @@ describe('@tapkart/net barrel', () => {
 
   it('drives a ShadowLoop through the barrel alone', () => {
     const ctx = makeNetContext(false)
-    const { createState } = require('@tapkart/sim') as typeof import('@tapkart/sim')
     const state = createState(ctx, 0x1, [0, 1, 2, 3, 4, 5, 6, 7])
     const shadow = new ShadowLoop(ctx, state, {
       send() {}, broadcast() {}, onMessage() {}, onPeerLost() {}, peers: () => [], close() {},
@@ -519,16 +565,25 @@ describe('@tapkart/net barrel', () => {
 - [ ] **Step 7: Run the test and confirm the RED**
 
 Run: `npx vitest run packages/net/test/barrel.test.ts`
-Expected: FAIL — `Failed to resolve import "../src/index" from "packages/net/test/barrel.test.ts"`.
 
-- [ ] **Step 8: Write the barrel**
+Expected: FAIL, and again **not** a resolution failure: contract §3 has Task 11's scaffold create
+`packages/net/src/index.ts` re-exporting `./transport`. `transport.ts` contributes nothing at
+runtime, so the barrel exists and is empty of values, and the first named import to be used throws:
 
-Create `packages/net/src/index.ts`:
+```
+TypeError: ShadowLoop is not a constructor
+```
+
+- [ ] **Step 8: Widen the barrel to every module**
+
+Bring `packages/net/src/index.ts` to exactly this content — appending the five lines Task 11's
+scaffold does not already have:
 
 ```typescript
 // Public barrel for @tapkart/net.
 //
-// packages/net/package.json maps "." to this file. Ordered as the locked contract's SS5 module map
+// packages/net/package.json maps "." to this file. Task 11's scaffold created it re-exporting
+// ./transport; this task appends the other five. Ordered as the locked contract's SS5 module map
 // lists them. `transport` contributes nothing at runtime (Transport is an interface only) but the
 // export line is still required — barrel.test.ts's module-completeness scan checks for the line
 // itself, not for anything it produces.
@@ -555,17 +610,26 @@ npx tsc --noEmit -p packages/net && npx vitest run packages/net
 ```
 
 Expected: PASS throughout, zero type errors, every `packages/net` test green — including this
-plan's Task 16 (`shadow.test.ts`, 15 tests) and Task 17 (5 integration tests across ~5400 ticks).
+plan's Task 16 (`shadow.test.ts`, 19 tests — Task 16's own residual-findings pass added one) and
+Task 17 (5 integration tests across ~5400 ticks).
 
 ---
 
 - [ ] **Step 11: Full workspace verification**
 
 Run: `npm run typecheck && npx vitest run`
-Expected: PASS across every package — `sim` (477+ tests, untouched by this plan), `protocol`, and
-`net`. This is the first point in Plan 2 where all three packages are typechecked and tested
-together through their public barrels, since nothing before this task exercised `@tapkart/protocol`
-or `@tapkart/net` as bare specifiers.
+Expected: PASS across every package — `sim`, `protocol` and `net`.
+
+**`sim`'s test count is not 477 here.** That was Plan 1's merged baseline (477 passed / 1 skipped).
+Plan 2's Tasks 1 and 2 change it: Task 1 deletes three checkpoint-parity tests and one
+hold-poisoning test and adds its own, Task 2 adds a full-tick leader/follower parity test. Measured
+on a scratch tree by the cross-cutting audit: baseline 478 total, Task 1 alone 477 total, Tasks 1+2
+**484 total**. Expect that figure, not "477+", and treat a mismatch as a signal that Tasks 1–2 did
+not land as written rather than as a number to edit.
+
+This is the first point in Plan 2 where all three packages are typechecked and tested together, and
+the first where `@tapkart/net` is exercised as a bare specifier — `@tapkart/protocol` has been one
+since Task 3.
 
 - [ ] **Step 12: Commit**
 
@@ -577,9 +641,10 @@ git commit -m "feat(protocol,net): add public barrel exports for both packages
 packages/protocol/src/index.ts re-exports all seven modules (types, bits,
 quant, snapshot, checkpoint, events, input); packages/net/src/index.ts
 re-exports all six (transport, loopback, apply, authority, client,
-shadow). Neither package was reachable via its bare specifier before this
-task, which is why every net task up to and including this plan's own
-Task 16/17 imports protocol's modules by relative path instead.
+shadow). Both files already existed - Task 3 and Task 11 created them as
+part of their scaffolds, and each codec task appended its own line - so
+this task widens them rather than creating them, which is what let every
+net task import @tapkart/protocol by its bare specifier all along.
 
 Both barrel tests import one named export from each module through the
 barrel, pin the contract constants, prove each barrel forwards its
@@ -595,9 +660,10 @@ specifiers the way a downstream package will."
 **Ambiguities and dependencies flagged for the plan's author:**
 
 1. This task assumes `packages/protocol/package.json` and `packages/net/package.json` already carry
-   `"exports": { ".": "./src/index.ts" }` from their scaffolding tasks (3 and 11). Neither file is
-   created by this task; if either is missing, Step 5's or Step 10's package-entry-point test names
-   the package directly.
+   `"exports": { ".": "./src/index.ts" }` from their scaffolding tasks (3 and 11), and that both
+   `src/index.ts` files already exist with at least their scaffold line. Neither file is created by
+   this task; if either is missing, Step 5's or Step 10's package-entry-point test names the package
+   directly.
 2. `packages/net/src/transport.ts` has zero runtime exports under the locked contract's given
    signature. If Task 11 ends up adding any runtime value there (a constant, an error class), this
    task's net barrel test's function-count assertion (currently 7) and module-exclusion list will

@@ -49,67 +49,62 @@ snapshot, then decodes a 0-entity snapshot into the *same* `out`, and asserts sl
 reads `entityId === -1` afterward — the specific failure mode a decoder that only
 writes `[0, entityCount)` and never touches the rest would produce.
 
-**Two decisions this task makes that diverge from contract §4's own prose, both
-because a locked TypeScript signature outranks a rounded arithmetic aside — flag
-these upstream when this task lands, they are genuine contract inconsistencies, not
-liberties taken lightly:**
+**`decodeSnapshot`'s re-sentinelling does not — and cannot — reach `targetId`,
+because `WireEntity` has no such field (contract §3); the obligation lands on
+`applySnapshotToState` instead, which writes into `SimState.entities`, and
+`EntityState` *does* have one.** `packages/sim/src/entity.ts`'s `clearSlot`
+pairs `entityId: -1` with `targetId: -1` always — a dead slot's `targetId` is
+never meaningfully anything else. Step 7's `applySnapshotToState` below resets
+`e.targetId` to `-1` on exactly the slots where `s.entityId === -1`, and leaves
+a live slot's `targetId` exactly as it found it (still correct — `WireEntity`
+carries no data for it either way). Without this, a slot that held a live
+seeker on an earlier decode keeps that seeker's old `targetId` after the seeker
+despawns and the slot is re-sentinelled — residue with no wire representation,
+consumed downstream by `ShadowLoop.reconcile` (Task 16), which calls this
+function directly.
 
-1. **No per-record byte alignment.** Contract §4 labels the per-kart record "177
-   bits ≈ 23 B" and the entity record "13 B" (disputed below) and the header
-   "25 B". Summing the header's own fields exactly — `tick`(32) + `eventSeq`(32) +
-   `lastProcessedInputTick`(8×16=128) + `entityCount`(8) = 200 bits — gives exactly
-   25 B with no rounding at all, and 8 karts × 177 bits = 1416 bits is *also*
-   exactly 177 B with no rounding. The "≈" is doing real work only on the per-kart
-   figure in isolation (177 bits alone is 22.125 B); once multiplied by 8 it stops
-   needing rounding. This is strong evidence the byte figures in contract §4 are
-   human-readable approximations of a continuously bit-packed stream, not a literal
-   per-record byte-alignment requirement — and `BitWriter`/`BitReader` (Task 4) have
-   no `align()`/`pad()` method, which is what a real per-record alignment rule would
-   need. This task packs the header, then all 8 kart records, then all
+**Two settled facts from contract §4's own current text — not open disputes, and not
+this task's to re-litigate, but restated here because an earlier draft of this brief
+argued them as unresolved:**
+
+1. **No per-record byte alignment.** Contract §4 states this directly: *"The
+   per-record byte figures are informational, not a padding rule. The stream is
+   continuously bit-packed — `BitWriter`/`BitReader` expose no `align()` and none is
+   wanted. A record does not start on a byte boundary, and encoders must not assume
+   it does."* This task packs the header, then all 8 kart records, then all
    `entityCount` entity records, fully continuously; the only padding anywhere is
    the implicit zero-padding of the buffer's final partial byte, which
    `BitWriter.byteLength()` already accounts for and which `decodeSnapshot` never
    reads (it stops after the same fields the matching encode wrote).
 2. **Entity `velocity` is a full quantised `Vec3` (3×12 bits, `Q.velocity`), not a
-   packed single `u16`.** Contract §4's own itemized entity-record sentence reads
-   `entityId u16, kind u4, ownerId u3, position 3×u16 ..., velocity packed 3×u12,
-   heading u12, ttl u16`, which sums to 135 bits (16.875 B) — not the "13 B" the
-   same sentence ends with. Spec §5's *older*, pre-Task-3 wording describes a
-   single combined `packed velocity/heading u16` field instead (103 bits, which
-   does land on 13 B), but that wording predates `WireEntity`'s locked shape:
-   contract §3 types `WireEntity.velocity` as a full `Vec3` — three independent
-   components — which a single combined 16-bit scalar cannot losslessly populate
-   without inventing an unspecified magnitude+direction split found nowhere in
-   either document. Rather than fabricate that scheme, this task honors the locked
-   `Vec3` type and contract §4's own itemized bit list, both of which are more
-   specific than the round "13 B" label. The entity record is therefore **135
-   bits**, not 13 B; this makes the "typical ~287 B / worst-case ~625 B" bandwidth
-   figures in spec §5 stale too (they were computed assuming the 13 B entity). None
-   of this affects correctness inside `packages/protocol` — encode and decode agree
-   with each other because both live in this one file — but whoever next touches
-   contract §4 or spec §5's bandwidth table should reconcile the entity record size
-   with `WireEntity.velocity: Vec3`, or explicitly narrow the type instead. Step 12
-   below pins the corrected entity bit count (135) in a test so a future "fix" that
-   quietly reintroduces the 13 B scheme is caught immediately.
+   packed single `u16`.** Contract §4 gives the itemised list directly: `entityId
+   u16, kind u4, ownerId u3, position 3×u16, velocity 3×u12, heading u12, ttl u16` →
+   **135 bits**, and says so explicitly: *"This is 135 bits, not the 13 B an earlier
+   draft claimed... Resolved in favour of the itemised list and the locked type:
+   entities are interpolated rather than predicted, and real per-axis velocity is
+   what makes that interpolation good."* This task honors that itemised list and the
+   locked `WireEntity.velocity: Vec3` type exactly; there is no packed-`u16` scheme
+   to reconstruct. Step 12 below pins the entity bit count (135) in a test so a
+   future "fix" that quietly reintroduces a packed scheme is caught immediately.
 
 **Two more decisions, ordinary ones this file has to make that are not disputes with
 the contract:**
 
-3. **`isBot`/`connected` share one wire bit, named `connected`.** Contract §4's row
-   `` `airborne`, `shielded`, `isBot`/`connected` | 1 each `` sums the whole table to
-   177 only if that row is *three* 1-bit fields, not four (Task 5's brief derives
-   this the same way). `KartState.isBot` and `KartState.connected` are therefore
-   assumed complementary — `isBot === !connected` — which is true of every state
-   `packages/sim` produces today: `createState` sets `isBot: true, connected: false`
-   for every seat, and a repo-wide grep for writes to either field
-   (`grep -rn "isBot\s*=\|connected\s*="  packages/sim/src/*.ts`) turns up only
-   `createState` and `cloneState`'s field-by-field copy — no other shipped code
-   writes either field, so the invariant cannot currently be broken from inside
-   `sim`. It is a `net`-package responsibility going forward (a client claiming or
-   dropping a seat) to preserve it; this codec cannot verify code that does not
-   exist yet, so it is stated here as the assumption it is, not proven. `connected`
-   is the bit written (the network-observable ground truth); `isBot` is derived on
-   decode/apply as its logical negation.
+3. **`isBot` and `connected` each get their own wire bit — they are never merged.**
+   Contract §4 is explicit and deliberate about this: *"`isBot` and `connected` get a
+   bit each, deliberately. An earlier draft implied they shared one, which only works
+   if `isBot === !connected` always holds. It happens to hold in shipped Plan 1 code,
+   but it is an *emergent* property... not an invariant anything enforces — and spec
+   §5 has a dropped client's kart 'taken over by a bot' and then 'reclaim[ed] on
+   reconnect', which is exactly the transition where the two could legitimately
+   disagree for a tick."* `encodeSnapshot` therefore writes `k.isBot` and
+   `k.connected` as two independent 1-bit fields, in that row order (`isBot` then
+   `connected`, matching contract §4's table), and `decodeSnapshot` reads both back
+   independently — neither is ever derived from the other. `applySnapshotToState`
+   copies both `WireKart.isBot` and `WireKart.connected` straight into `SimState`,
+   so a snapshot genuinely carrying a disagreement (bot-takeover, then a reconnect
+   racing the next snapshot) reconciles correctly instead of silently normalising to
+   `isBot = !connected`.
 4. **`driftActive`+`driftDir` pack into 2 bits as `0`=inactive, `1`=active
    dir=-1, `2`=active dir=1 (`3` unused).** Verified against
    `packages/sim/src/drift.ts`: every branch of `updateDrift` that sets
@@ -172,7 +167,9 @@ the contract:**
   exactly as that task built them.
 - Consumes (from Task 5, `packages/protocol/src/quant.ts`): `Q` (this task never
   needs `EPS` or `quantStep` for its implementation — only its tests, to compute
-  round-trip tolerances).
+  round-trip tolerances). `Q` covers only the six continuous fields (`position,
+  velocity, heading, angularVelocity, driftCharge, t`); this task sources the
+  fourteen exact/enum fields' bit widths itself, as local constants (Step 3).
 - Produces (`packages/protocol/src/snapshot.ts`), contract §3:
   ```ts
   export function encodeSnapshot(out: Uint8Array, state: SimState,
@@ -185,18 +182,41 @@ the contract:**
   absent "must define it in its own files and say so"): `ITEM_KINDS`, `SURFACES`,
   `ENTITY_KINDS` (arrays giving each string-literal enum a wire index, in the exact
   declaration order `packages/sim/src/types.ts` lists them — verified by reading
-  that file directly), `packDrift`, `unpackDriftActive`, `unpackDriftDir`, and the
-  four entity/header bit-width constants named in Step 3.
+  that file directly), `packDrift`, `unpackDriftActive`, `unpackDriftDir`, and 22
+  bit-width constants named in Step 3: 4 for the entity record (`ENTITY_ID_BITS`,
+  etc.), 4 for the header (`HEADER_TICK_BITS`, etc.), and 14 for the per-kart exact
+  fields (`SPIN_OUT_TICKS_BITS` through `PLAYER_ID_BITS`) that contract §4 gives no
+  `Q`/`EPS` entry to, per Task 5.
 
 **Wire order, stated once here because nothing else in the codebase enforces it and
 encode/decode must agree byte-for-byte:** header, then all `MAX_KARTS` kart records
-in slot order `0..7` (each kart's 23 fields in exactly contract §4's row order,
-listed field-by-field in Step 3), then `state.entityCount` entity records in their
-already-packed order. Header field order is `tick`, `eventSeq`,
-`lastProcessedInputTick[0..7]`, `entityCount` — `entityCount` is read *before* the
-entities so a streaming decoder knows how many to expect; `WireSnapshot`'s own
-TypeScript field order (which lists `entities` before `entityCount`, purely for
-interface readability) is not the wire order.
+in slot order `0..7` (each kart's 24 fields — `position`/`velocity` count as 3 wire
+writes each, x/y/z — in exactly contract §4's row order, listed field-by-field in
+Step 3), then `state.entityCount` entity records in their already-packed order.
+Header field order is `tick`, `eventSeq`, `lastProcessedInputTick[0..7]`,
+`entityCount` — `entityCount` is read *before* the entities so a streaming decoder
+knows how many to expect; `WireSnapshot`'s own TypeScript field order (which lists
+`entities` before `entityCount`, purely for interface readability) is not the wire
+order.
+
+**`lastProcessedInputTick` entries are biased by `+1` on the wire, the same scheme
+contract §4a already uses for `AuthEvent.playerId`/`entityId`.** The field is `-1`
+for "no real input received yet from this player" (spec §5's definition: the
+newest *real*, non-held input the authority had folded in) and unsigned `u16`
+otherwise (contract §4). Writing the raw signed value with `writeBits(v, 16)` is
+not a round-trip bug in the narrow sense — `BitWriter`/`BitReader` treat `-1` as
+`0xFFFF` and read it back as `0xFFFF` — but it silently *relabels* "nothing
+received yet" as "the authority's newest real input for this player was tick
+65535," which is a different, false claim about the world. Task 9's `events.ts`
+already establishes the pattern for exactly this shape of problem: store
+`value + 1`, so the sentinel travels as `0` and every real tick `T` travels as
+`T + 1`. `encodeSnapshot` therefore writes `lastProcessedInputTick[i] + 1`, and
+`decodeSnapshot` reads it back and subtracts `1`. The cost is one representable
+tick at the far end of the 16-bit range (`65534` instead of `65535`), matching the
+cost Task 9 already accepted for `playerId`/`entityId`. Nothing in Plan 2 compares
+against this field yet (contract §0/§5: no task anchors reconciliation on it), so
+the bug was latent — but the wire format is still wrong today, and a later plan
+that starts reading it inherits a value that means the opposite of what it says.
 
 ---
 
@@ -213,14 +233,18 @@ import { BitWriter } from '../src/bits'
 import { Q, quantStep } from '../src/quant'
 import { decodeSnapshot, encodeSnapshot } from '../src/snapshot'
 
-const BUF_SIZE = 512
+// 743 B covers the worst case (MAX_ENTITIES=32 live entities, all 8 karts) with
+// margin: header(200) + 8*178 kart bits + 32*135 entity bits = 5944 bits = 743 B
+// exactly. 1024 gives headroom above that without needing to be recomputed if a
+// field width ever changes by a bit or two.
+const BUF_SIZE = 1024
 
 const STEP_POS = quantStep(Q.position.min, Q.position.max, Q.position.bits)
 const STEP_VEL = quantStep(Q.velocity.min, Q.velocity.max, Q.velocity.bits)
 const STEP_HEADING = quantStep(Q.heading.min, Q.heading.max, Q.heading.bits)
 const STEP_ANGVEL = quantStep(Q.angularVelocity.min, Q.angularVelocity.max, Q.angularVelocity.bits)
 const STEP_DRIFT_CHARGE = quantStep(Q.driftCharge.min, Q.driftCharge.max, Q.driftCharge.bits)
-const STEP_LAP_T = quantStep(Q.lapT.min, Q.lapT.max, Q.lapT.bits)
+const STEP_T = quantStep(Q.t.min, Q.t.max, Q.t.bits)
 
 function makeNeutralIntent(): Intent {
   return { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
@@ -357,11 +381,18 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     k0.isBot = false
     k0.lap = { lap: 2, checkpointIdx: 5, t: 0.37 }
 
+    // kart 1 deliberately disagrees: isBot and connected both true. Under a decode
+    // that (wrongly) derives isBot as !connected, this combination is unreachable;
+    // it is also NOT makeWireKart's default pair (isBot: true, connected: false),
+    // so this proves both bits are read off the wire independently rather than one
+    // being inferred from the other's default. This is exactly the spec §5
+    // transition ("taken over by a bot", "reclaim[ed] on reconnect") where the two
+    // can legitimately disagree for a tick.
     const k1 = state.karts[1]
     k1.drift = { active: true, dir: 1, charge: 200 }
     k1.item = 'charge'
     k1.surface = 'boost'
-    k1.connected = false
+    k1.connected = true
     k1.isBot = true
 
     const buf = new Uint8Array(BUF_SIZE)
@@ -373,7 +404,6 @@ describe('encodeSnapshot / decodeSnapshot', () => {
 
     expect(snap.tick).toBe(12345)
     expect(snap.eventSeq).toBe(42)
-    expect(snap.entityCount).toBe(0)
     expect(snap.lastProcessedInputTick).toEqual(lastProcessedInputTick)
 
     const d0 = snap.karts[0]
@@ -386,7 +416,7 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     expect(Math.abs(d0.heading - 1.2)).toBeLessThan(STEP_HEADING)
     expect(Math.abs(d0.angularVelocity - -3.5)).toBeLessThan(STEP_ANGVEL)
     expect(Math.abs(d0.driftCharge - 40)).toBeLessThan(STEP_DRIFT_CHARGE)
-    expect(Math.abs(d0.t - 0.37)).toBeLessThan(STEP_LAP_T)
+    expect(Math.abs(d0.t - 0.37)).toBeLessThan(STEP_T)
     expect(d0.driftActive).toBe(true)
     expect(d0.driftDir).toBe(-1)
     expect(d0.item).toBe('bolt')
@@ -408,8 +438,13 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     expect(d1.driftDir).toBe(1)
     expect(d1.item).toBe('charge')
     expect(d1.surface).toBe('boost')
-    expect(d1.connected).toBe(false)
+    // Both true: proves connected did not decode as !isBot, and vice versa.
+    expect(d1.connected).toBe(true)
     expect(d1.isBot).toBe(true)
+    // kart 0's playerId (0) is tautological -- it equals both the slot index and
+    // WireKart's own default. kart 1's playerId (1) is neither, so this is the
+    // assertion that actually proves playerId is read off the wire.
+    expect(d1.playerId).toBe(1)
   })
 
   it('round-trips every continuous kart field at both range endpoints exactly', () => {
@@ -420,7 +455,10 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     k.heading = -Math.PI
     k.angularVelocity = 16
     k.drift.charge = 255
-    k.lap.t = 0
+    // t's range is [0, 1); 1 is the upper endpoint writeFloatQ clamps to and
+    // quantises exactly. 0 would coincide with makeWireKart's default and prove
+    // nothing about decode actually running.
+    k.lap.t = 1
 
     const buf = new Uint8Array(BUF_SIZE)
     const bytes = encodeSnapshot(buf, state, new Array(MAX_KARTS).fill(0))
@@ -433,7 +471,7 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     expect(d.heading).toBe(-Math.PI)
     expect(d.angularVelocity).toBe(16)
     expect(d.driftCharge).toBe(255)
-    expect(d.t).toBe(0)
+    expect(d.t).toBe(1)
   })
 
   it('clamps out-of-range continuous kart fields instead of wrapping', () => {
@@ -471,6 +509,10 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     const buf = new Uint8Array(BUF_SIZE)
     const bytes = encodeSnapshot(buf, state, new Array(MAX_KARTS).fill(0))
     const snap = makeEmptySnapshot()
+    // Dirty a dead-range slot before decoding, so the tail loop below proves
+    // decodeSnapshot actively re-sentinels rather than reading makeWireEntity's
+    // already-(-1) default off an untouched object.
+    snap.entities[5].entityId = 12345
     decodeSnapshot(buf.subarray(0, bytes), snap)
 
     expect(snap.entityCount).toBe(2)
@@ -520,10 +562,57 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     for (let i = 0; i < 3; i++) state.entities[i] = { ...makeDeadEntity(), entityId: i }
     const buf = new Uint8Array(BUF_SIZE)
     const bytes = encodeSnapshot(buf, state, new Array(MAX_KARTS).fill(0))
-    // 200 header bits + 8*177 kart bits + 3*135 entity bits, continuously packed,
-    // rounded up once at the very end (this task's decision 1 and 2)
-    const totalBits = 200 + MAX_KARTS * 177 + 3 * 135
+    // 200 header bits + 8*178 kart bits + 3*135 entity bits, continuously packed,
+    // rounded up once at the very end (this task's settled facts 1 and 2)
+    const totalBits = 200 + MAX_KARTS * 178 + 3 * 135
     expect(bytes).toBe(Math.ceil(totalBits / 8))
+  })
+
+  it('round-trips at the worst case: MAX_ENTITIES live entities, all karts populated', () => {
+    // header(200) + 8*178 kart bits + 32*135 entity bits = 5944 bits = 743 B
+    // exactly -- the figure contract §4 and spec §5 both give as the worst case.
+    // BitWriter.writeBits silently no-ops past a Uint8Array's end (Task 4), so an
+    // undersized buffer here would truncate without ever throwing; this is the one
+    // test in this task that would catch it.
+    const state = makeState()
+    state.entityCount = MAX_ENTITIES
+    for (let i = 0; i < MAX_ENTITIES; i++) {
+      state.entities[i] = {
+        entityId: i + 1, kind: 'seeker', ownerId: i % MAX_KARTS,
+        position: { x: i, y: 0, z: -i }, velocity: { x: 1, y: 0, z: -1 },
+        heading: 0.1 * i, targetId: -1, ttl: 100 + i,
+      }
+    }
+    const buf = new Uint8Array(BUF_SIZE)
+    const bytes = encodeSnapshot(buf, state, new Array(MAX_KARTS).fill(0))
+    expect(bytes).toBe(743)
+
+    const snap = makeEmptySnapshot()
+    decodeSnapshot(buf.subarray(0, bytes), snap)
+    expect(snap.entityCount).toBe(MAX_ENTITIES)
+    expect(snap.entities[MAX_ENTITIES - 1].entityId).toBe(MAX_ENTITIES)
+    expect(snap.entities[MAX_ENTITIES - 1].ttl).toBe(100 + MAX_ENTITIES - 1)
+  })
+
+  it('round-trips the -1 "no real input yet" sentinel in lastProcessedInputTick, biased so it never collides with a real tick', () => {
+    // Without the +1 bias, -1 encodes as the raw two's-complement bit pattern
+    // BitWriter.writeBits produces for a negative value into 16 bits (0xFFFF)
+    // and decodes back as 65535 -- a real (if implausible) tick number, not
+    // "nothing received yet". This state's tick/entity contents don't matter;
+    // only the header's lastProcessedInputTick array is under test here.
+    const state = makeState()
+    const buf = new Uint8Array(BUF_SIZE)
+    // Mixes the sentinel with real ticks, including one adjacent to the
+    // sentinel's own biased wire value (0) and one near the top of the
+    // biased range, so an off-by-one in the bias would show up as a specific
+    // wrong number rather than a coincidental pass.
+    const lastProcessedInputTick = [-1, 0, 1, -1, 65534, -1, -1, -1]
+    const bytes = encodeSnapshot(buf, state, lastProcessedInputTick)
+
+    const snap = makeEmptySnapshot()
+    decodeSnapshot(buf.subarray(0, bytes), snap)
+
+    expect(snap.lastProcessedInputTick).toEqual(lastProcessedInputTick)
   })
 
   it('writes header then karts in exactly contract §4 row order, then entities', () => {
@@ -559,7 +648,8 @@ describe('encodeSnapshot / decodeSnapshot', () => {
     const rw = new BitWriter(ref)
     rw.writeBits(state.tick, 32)
     rw.writeBits(state.nextEventSeq, 32)
-    for (let i = 0; i < MAX_KARTS; i++) rw.writeBits(lastProcessedInputTick[i], 16)
+    // +1-biased, same as encodeSnapshot: -1 travels as 0.
+    for (let i = 0; i < MAX_KARTS; i++) rw.writeBits(lastProcessedInputTick[i] + 1, 16)
     rw.writeBits(state.entityCount, 8)
     for (let i = 0; i < MAX_KARTS; i++) {
       const kk = state.karts[i]
@@ -572,7 +662,7 @@ describe('encodeSnapshot / decodeSnapshot', () => {
       rw.writeFloatQ(kk.heading, Q.heading.min, Q.heading.max, Q.heading.bits)
       rw.writeFloatQ(kk.angularVelocity, Q.angularVelocity.min, Q.angularVelocity.max, Q.angularVelocity.bits)
       rw.writeFloatQ(kk.drift.charge, Q.driftCharge.min, Q.driftCharge.max, Q.driftCharge.bits)
-      rw.writeFloatQ(kk.lap.t, Q.lapT.min, Q.lapT.max, Q.lapT.bits)
+      rw.writeFloatQ(kk.lap.t, Q.t.min, Q.t.max, Q.t.bits)
       rw.writeBits(kk.spinOutTicks, 8)
       rw.writeBits(kk.invulnTicks, 8)
       rw.writeBits(kk.boostTicks, 7)
@@ -584,6 +674,7 @@ describe('encodeSnapshot / decodeSnapshot', () => {
       rw.writeBits(!kk.drift.active ? 0 : kk.drift.dir === -1 ? 1 : 2, 2)
       rw.writeBits(kk.airborne ? 1 : 0, 1)
       rw.writeBits(kk.shielded ? 1 : 0, 1)
+      rw.writeBits(kk.isBot ? 1 : 0, 1)
       rw.writeBits(kk.connected ? 1 : 0, 1)
       rw.writeBits(kk.playerId, 3)
     }
@@ -629,9 +720,9 @@ const ITEM_KINDS: ItemKind[] = [
 const SURFACES: Surface[] = ['tarmac', 'dirt', 'boost', 'offtrack']
 const ENTITY_KINDS: EntityKind[] = ['seeker', 'bolt', 'slick', 'bubble', 'surge', 'charge']
 
-// Entity and header fields are plain fixed-width integers with no epsilon concept
-// (Task 5's brief, decision-setting paragraph): sourced here as literals straight
-// from contract §4's prose, not through Q, which covers only the per-kart table.
+// Entity and header fields are plain fixed-width integers with no epsilon concept:
+// sourced here as literals straight from contract §4's prose, not through Q, which
+// covers only the six continuous per-kart fields.
 const ENTITY_ID_BITS = 16
 const ENTITY_KIND_BITS = 4
 const ENTITY_OWNER_BITS = 3
@@ -640,6 +731,24 @@ const HEADER_TICK_BITS = 32
 const HEADER_EVENT_SEQ_BITS = 32
 const HEADER_LAST_INPUT_TICK_BITS = 16
 const HEADER_ENTITY_COUNT_BITS = 8
+
+// The fourteen exact/enum per-kart fields contract §4 gives no Q/EPS entry to
+// (Task 5): no quantisation noise, so no epsilon, and the widths live here as
+// literals in exactly contract §4's row order.
+const SPIN_OUT_TICKS_BITS = 8
+const INVULN_TICKS_BITS = 8
+const BOOST_TICKS_BITS = 7
+const RESPAWN_TICKS_BITS = 7
+const LAP_BITS = 3
+const CHECKPOINT_IDX_BITS = 6
+const ITEM_BITS = 4
+const SURFACE_BITS = 2
+const DRIFT_PACKED_BITS = 2
+const AIRBORNE_BITS = 1
+const SHIELDED_BITS = 1
+const IS_BOT_BITS = 1
+const CONNECTED_BITS = 1
+const PLAYER_ID_BITS = 3
 
 /** driftActive+driftDir -> 2 raw bits. 0 = inactive, 1 = active dir -1, 2 = active
  * dir 1. 3 is unused: packages/sim/src/drift.ts never produces dir != 0 while
@@ -675,7 +784,11 @@ export function encodeSnapshot(
   bw.writeBits(state.tick, HEADER_TICK_BITS)
   bw.writeBits(state.nextEventSeq, HEADER_EVENT_SEQ_BITS)
   for (let i = 0; i < MAX_KARTS; i++) {
-    bw.writeBits(lastProcessedInputTick[i], HEADER_LAST_INPUT_TICK_BITS)
+    // Biased by +1, same scheme as AuthEvent.playerId/entityId (Task 9): -1
+    // ("no real input yet") travels as 0, and real tick T travels as T + 1.
+    // An unbiased write would make -1 indistinguishable from "the newest real
+    // input was tick 65535" on the wire.
+    bw.writeBits(lastProcessedInputTick[i] + 1, HEADER_LAST_INPUT_TICK_BITS)
   }
   bw.writeBits(state.entityCount, HEADER_ENTITY_COUNT_BITS)
 
@@ -690,20 +803,23 @@ export function encodeSnapshot(
     bw.writeFloatQ(k.heading, Q.heading.min, Q.heading.max, Q.heading.bits)
     bw.writeFloatQ(k.angularVelocity, Q.angularVelocity.min, Q.angularVelocity.max, Q.angularVelocity.bits)
     bw.writeFloatQ(k.drift.charge, Q.driftCharge.min, Q.driftCharge.max, Q.driftCharge.bits)
-    bw.writeFloatQ(k.lap.t, Q.lapT.min, Q.lapT.max, Q.lapT.bits)
-    bw.writeBits(k.spinOutTicks, Q.spinOutTicks.bits)
-    bw.writeBits(k.invulnTicks, Q.invulnTicks.bits)
-    bw.writeBits(k.boostTicks, Q.boostTicks.bits)
-    bw.writeBits(k.respawnTicks, Q.respawnTicks.bits)
-    bw.writeBits(k.lap.lap, Q.lap.bits)
-    bw.writeBits(k.lap.checkpointIdx, Q.checkpointIdx.bits)
-    bw.writeBits(ITEM_KINDS.indexOf(k.item), Q.item.bits)
-    bw.writeBits(SURFACES.indexOf(k.surface), Q.surface.bits)
-    bw.writeBits(packDrift(k.drift.active, k.drift.dir), Q.driftPacked.bits)
-    bw.writeBits(k.airborne ? 1 : 0, Q.airborne.bits)
-    bw.writeBits(k.shielded ? 1 : 0, Q.shielded.bits)
-    bw.writeBits(k.connected ? 1 : 0, Q.connected.bits)
-    bw.writeBits(k.playerId, Q.playerId.bits)
+    bw.writeFloatQ(k.lap.t, Q.t.min, Q.t.max, Q.t.bits)
+    bw.writeBits(k.spinOutTicks, SPIN_OUT_TICKS_BITS)
+    bw.writeBits(k.invulnTicks, INVULN_TICKS_BITS)
+    bw.writeBits(k.boostTicks, BOOST_TICKS_BITS)
+    bw.writeBits(k.respawnTicks, RESPAWN_TICKS_BITS)
+    bw.writeBits(k.lap.lap, LAP_BITS)
+    bw.writeBits(k.lap.checkpointIdx, CHECKPOINT_IDX_BITS)
+    bw.writeBits(ITEM_KINDS.indexOf(k.item), ITEM_BITS)
+    bw.writeBits(SURFACES.indexOf(k.surface), SURFACE_BITS)
+    bw.writeBits(packDrift(k.drift.active, k.drift.dir), DRIFT_PACKED_BITS)
+    bw.writeBits(k.airborne ? 1 : 0, AIRBORNE_BITS)
+    bw.writeBits(k.shielded ? 1 : 0, SHIELDED_BITS)
+    // isBot and connected are two independent bits (contract §4, this task's
+    // decision 3) -- neither is ever derived from the other.
+    bw.writeBits(k.isBot ? 1 : 0, IS_BOT_BITS)
+    bw.writeBits(k.connected ? 1 : 0, CONNECTED_BITS)
+    bw.writeBits(k.playerId, PLAYER_ID_BITS)
   }
 
   for (let i = 0; i < state.entityCount; i++) {
@@ -742,7 +858,9 @@ export function decodeSnapshot(buf: Uint8Array, out: WireSnapshot): void {
   out.tick = br.readBits(HEADER_TICK_BITS)
   out.eventSeq = br.readBits(HEADER_EVENT_SEQ_BITS)
   for (let i = 0; i < MAX_KARTS; i++) {
-    out.lastProcessedInputTick[i] = br.readBits(HEADER_LAST_INPUT_TICK_BITS)
+    // Inverse of encodeSnapshot's +1 bias: wire 0 -> -1 ("no real input yet"),
+    // wire T + 1 -> real tick T.
+    out.lastProcessedInputTick[i] = br.readBits(HEADER_LAST_INPUT_TICK_BITS) - 1
   }
   const entityCount = br.readBits(HEADER_ENTITY_COUNT_BITS)
   out.entityCount = entityCount
@@ -758,24 +876,24 @@ export function decodeSnapshot(buf: Uint8Array, out: WireSnapshot): void {
     k.heading = br.readFloatQ(Q.heading.min, Q.heading.max, Q.heading.bits)
     k.angularVelocity = br.readFloatQ(Q.angularVelocity.min, Q.angularVelocity.max, Q.angularVelocity.bits)
     k.driftCharge = br.readFloatQ(Q.driftCharge.min, Q.driftCharge.max, Q.driftCharge.bits)
-    k.t = br.readFloatQ(Q.lapT.min, Q.lapT.max, Q.lapT.bits)
-    k.spinOutTicks = br.readBits(Q.spinOutTicks.bits)
-    k.invulnTicks = br.readBits(Q.invulnTicks.bits)
-    k.boostTicks = br.readBits(Q.boostTicks.bits)
-    k.respawnTicks = br.readBits(Q.respawnTicks.bits)
-    k.lap = br.readBits(Q.lap.bits)
-    k.checkpointIdx = br.readBits(Q.checkpointIdx.bits)
-    k.item = ITEM_KINDS[br.readBits(Q.item.bits)]
-    k.surface = SURFACES[br.readBits(Q.surface.bits)]
-    const driftRaw = br.readBits(Q.driftPacked.bits)
+    k.t = br.readFloatQ(Q.t.min, Q.t.max, Q.t.bits)
+    k.spinOutTicks = br.readBits(SPIN_OUT_TICKS_BITS)
+    k.invulnTicks = br.readBits(INVULN_TICKS_BITS)
+    k.boostTicks = br.readBits(BOOST_TICKS_BITS)
+    k.respawnTicks = br.readBits(RESPAWN_TICKS_BITS)
+    k.lap = br.readBits(LAP_BITS)
+    k.checkpointIdx = br.readBits(CHECKPOINT_IDX_BITS)
+    k.item = ITEM_KINDS[br.readBits(ITEM_BITS)]
+    k.surface = SURFACES[br.readBits(SURFACE_BITS)]
+    const driftRaw = br.readBits(DRIFT_PACKED_BITS)
     k.driftActive = unpackDriftActive(driftRaw)
     k.driftDir = unpackDriftDir(driftRaw)
-    k.airborne = br.readBits(Q.airborne.bits) !== 0
-    k.shielded = br.readBits(Q.shielded.bits) !== 0
-    const connected = br.readBits(Q.connected.bits) !== 0
-    k.connected = connected
-    k.isBot = !connected
-    k.playerId = br.readBits(Q.playerId.bits)
+    k.airborne = br.readBits(AIRBORNE_BITS) !== 0
+    k.shielded = br.readBits(SHIELDED_BITS) !== 0
+    // Two independent reads -- neither is derived from the other (decision 3).
+    k.isBot = br.readBits(IS_BOT_BITS) !== 0
+    k.connected = br.readBits(CONNECTED_BITS) !== 0
+    k.playerId = br.readBits(PLAYER_ID_BITS)
   }
 
   for (let i = 0; i < entityCount; i++) {
@@ -813,7 +931,7 @@ export function decodeSnapshot(buf: Uint8Array, out: WireSnapshot): void {
 
 Run: `npx vitest run packages/protocol/test/snapshot.test.ts`
 
-Expected: PASS — 7 passed.
+Expected: PASS — 9 passed.
 
 ---
 
@@ -844,7 +962,9 @@ describe('applySnapshotToState', () => {
     k.spinOutTicks = 7
     k.invulnTicks = 3
     k.boostTicks = 20
-    k.respawnTicks = 0
+    // 0 would coincide with makeKart's default and dst's own starting value,
+    // proving nothing about whether this field was actually copied.
+    k.respawnTicks = 15
     k.shielded = true
     k.connected = true
     k.isBot = false
@@ -872,13 +992,13 @@ describe('applySnapshotToState', () => {
     expect(dk.spinOutTicks).toBe(7)
     expect(dk.invulnTicks).toBe(3)
     expect(dk.boostTicks).toBe(20)
-    expect(dk.respawnTicks).toBe(0)
+    expect(dk.respawnTicks).toBe(15)
     expect(dk.shielded).toBe(true)
     expect(dk.connected).toBe(true)
     expect(dk.isBot).toBe(false)
     expect(dk.lap.lap).toBe(1)
     expect(dk.lap.checkpointIdx).toBe(2)
-    expect(Math.abs(dk.lap.t - 0.6)).toBeLessThan(STEP_LAP_T)
+    expect(Math.abs(dk.lap.t - 0.6)).toBeLessThan(STEP_T)
   })
 
   it('copies every WireEntity field except targetId, which the wire does not carry', () => {
@@ -908,10 +1028,41 @@ describe('applySnapshotToState', () => {
     expect(dst.entities[0].targetId).toBe(999)
   })
 
+  it('resets a re-sentinelled entity slot\'s targetId to -1, matching entity.ts\'s clearSlot convention', () => {
+    // A dead slot on the wire (entityId === -1) carries no targetId at all -
+    // WireEntity has no such field - but the DESTINATION slot may still hold
+    // one left over from an earlier decode, when it was a live seeker homing
+    // on some kart. Left alone, a shadow that reconciles right after that
+    // seeker despawns (Task 16's ShadowLoop.reconcile calls this function
+    // directly) would carry a targetId referencing a kart no entity in the
+    // decoded state is actually homing on - residue entity.ts's own
+    // clearSlot() would never produce for a real dead slot.
+    const source = makeState()
+    source.entityCount = 0 // nothing live on the wire
+    const buf = new Uint8Array(BUF_SIZE)
+    const bytes = encodeSnapshot(buf, source, new Array(MAX_KARTS).fill(0))
+    const snap = makeEmptySnapshot()
+    decodeSnapshot(buf.subarray(0, bytes), snap)
+    expect(snap.entities[0].entityId).toBe(-1)
+
+    const dst = makeState()
+    // Marker: simulates the slot's leftover state from an earlier decode that
+    // held a live seeker targeting kart 5. Not -1, so a fix-free run leaves it
+    // exactly here rather than by coincidence landing on the right answer.
+    dst.entities[0].targetId = 5
+
+    applySnapshotToState(snap, dst)
+
+    expect(dst.entities[0].entityId).toBe(-1)
+    expect(dst.entities[0].targetId).toBe(-1)
+  })
+
   it('writes tick and entityCount, since both are carried on the wire', () => {
     const source = makeState()
     source.tick = 777
-    source.entityCount = 0
+    // Nonzero and different from dst's starting value below, so this proves a
+    // real copy rather than two defaults happening to agree at 0.
+    source.entityCount = 4
     const buf = new Uint8Array(BUF_SIZE)
     const bytes = encodeSnapshot(buf, source, new Array(MAX_KARTS).fill(0))
     const snap = makeEmptySnapshot()
@@ -919,13 +1070,18 @@ describe('applySnapshotToState', () => {
 
     const dst = makeState()
     dst.tick = 1
+    dst.entityCount = 1
     applySnapshotToState(snap, dst)
     expect(dst.tick).toBe(777)
-    expect(dst.entityCount).toBe(0)
+    expect(dst.entityCount).toBe(4)
   })
 
-  it('does not touch any field the wire does not carry', () => {
+  it('does not touch any field the wire does not carry, while still writing the fields it does', () => {
     const source = makeState()
+    // A positive companion to the negative checks below: proves this function
+    // does something, not just that it leaves the exclusion list alone (a
+    // complete no-op would otherwise pass every assertion in this test).
+    source.tick = 999
     const buf = new Uint8Array(BUF_SIZE)
     const bytes = encodeSnapshot(buf, source, new Array(MAX_KARTS).fill(0))
     const snap = makeEmptySnapshot()
@@ -948,6 +1104,7 @@ describe('applySnapshotToState', () => {
 
     applySnapshotToState(snap, dst)
 
+    expect(dst.tick).toBe(999)
     expect(dst.rngCursor).toBe(999)
     expect(dst.nextEventSeq).toBe(888)
     expect(dst.nextEntityId).toBe(777)
@@ -986,9 +1143,23 @@ Append to the end of `packages/protocol/src/snapshot.ts`:
  * existing; that field is for the caller to read directly off the decoded
  * WireSnapshot, not to be replayed into SimState here), nor raceSeed
  * (WireSnapshot has no such field) nor karts[i].characterIdx (deliberately absent
- * from the wire, contract §1c/§5) nor entities[i].targetId (WireEntity has no such
- * field). DOES write dst.tick and dst.entityCount - both are carried on the wire
- * and neither is on the exclusion list.
+ * from the wire, contract §1c/§5). DOES write dst.tick and dst.entityCount - both
+ * are carried on the wire and neither is on the exclusion list. Writes k.isBot
+ * and k.connected as two independent fields (decision 3) - a snapshot that
+ * genuinely carries them disagreeing (bot-takeover racing a reconnect)
+ * reconciles correctly.
+ *
+ * entities[i].targetId is a partial exception, not a blanket one: WireEntity
+ * has no such field, so a LIVE slot's targetId is left exactly as this
+ * function found it (still correct - there is no wire data to prefer either
+ * way). A DEAD slot (wire entityId === -1) is different: entity.ts's
+ * clearSlot() always pairs entityId === -1 with targetId === -1, and this
+ * function is the only place with both the dead-slot signal (from the wire)
+ * and a targetId field to clear (WireEntity has none) - decodeSnapshot's own
+ * re-sentinelling cannot reach it. Leaving it alone here means a slot that
+ * held a live seeker on an earlier decode keeps that seeker's old targetId
+ * after the seeker despawns and the slot goes dead - residue with no wire
+ * representation, consumed downstream by ShadowLoop.reconcile (Task 16).
  */
 export function applySnapshotToState(snap: WireSnapshot, dst: SimState): void {
   dst.tick = snap.tick
@@ -1039,7 +1210,15 @@ export function applySnapshotToState(snap: WireSnapshot, dst: SimState): void {
     e.velocity.z = s.velocity.z
     e.heading = s.heading
     e.ttl = s.ttl
-    // e.targetId: deliberately untouched, see this function's docstring
+    // e.targetId: WireEntity carries no such field, so a LIVE slot's targetId
+    // is left exactly as this function found it (see docstring). A DEAD slot
+    // (entityId === -1) is different: entity.ts's clearSlot() always pairs
+    // entityId === -1 with targetId === -1, and a slot that held a live
+    // seeker on a previous decode must not keep claiming to target a kart
+    // once the wire says the slot is empty - re-sentinel it here, the same
+    // convention decodeSnapshot already applies to entityId/position/etc for
+    // dead slots (that function just has no targetId field to do it with).
+    if (s.entityId === -1) e.targetId = -1
   }
 }
 ```
@@ -1048,7 +1227,7 @@ export function applySnapshotToState(snap: WireSnapshot, dst: SimState): void {
 
 Run: `npx vitest run packages/protocol/test/snapshot.test.ts`
 
-Expected: PASS — 11 passed (7 from `encodeSnapshot`/`decodeSnapshot`, 4 from
+Expected: PASS — 14 passed (9 from `encodeSnapshot`/`decodeSnapshot`, 5 from
 `applySnapshotToState`).
 
 ---
@@ -1057,13 +1236,110 @@ Expected: PASS — 11 passed (7 from `encodeSnapshot`/`decodeSnapshot`, 4 from
 
 Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
 
-Expected: PASS — no TypeScript errors; `snapshot.test.ts` 11 passed, plus Tasks 3,
-4 and 5's tests (`bits.test.ts` 13, `quant.test.ts` 13, plus whatever Task 3
-shipped for `types.ts`).
+Expected: PASS — no TypeScript errors; `snapshot.test.ts` 14 passed, plus Tasks 3,
+4 and 5's tests (`types.test.ts` 13, `bits.test.ts` 14, `quant.test.ts` 13).
 
-- [ ] **Step 10: Commit**
+---
+
+- [ ] **Step 10: Write the failing test — `encodeSnapshot`, `decodeSnapshot`, `applySnapshotToState` reachable through the barrel**
+
+Contract §3: "The barrel exists from Task 3, not Task 18" — by the time this task
+runs, `packages/protocol/src/index.ts` re-exports `./types`, `./bits` and `./quant`
+(Tasks 3-5). This task's module is `snapshot.ts`; appending its own line is this
+task's last implementation step, exactly as Plan 1's Tasks 3-10 each did for
+`@tapkart/sim/src/index.ts`, so `packages/net` can `import ... from
+'@tapkart/protocol'` from Task 11 onward without waiting for Task 18.
+
+Append to `packages/protocol/test/snapshot.test.ts`, after the closing `})` of
+`describe('applySnapshotToState', ...)`:
+
+```ts
+describe('@tapkart/protocol barrel', () => {
+  it('re-exports encodeSnapshot, decodeSnapshot and applySnapshotToState', async () => {
+    const pkg = await import('@tapkart/protocol')
+    expect(typeof pkg.encodeSnapshot).toBe('function')
+    expect(typeof pkg.decodeSnapshot).toBe('function')
+    expect(typeof pkg.applySnapshotToState).toBe('function')
+  })
+})
+```
+
+This is a dynamic import, matching Task 3's own barrel test in `types.test.ts` and
+`packages/sim/test/barrel.test.ts`'s `'resolves through the @tapkart/sim package entry
+point'` test, so a resolution failure fails this one test rather than the whole file.
+
+- [ ] **Step 11: Run the test to verify it fails**
+
+Run: `npx vitest run packages/protocol/test/snapshot.test.ts -t "re-exports encodeSnapshot, decodeSnapshot and applySnapshotToState"`
+
+Expected: FAIL — `packages/protocol/src/index.ts` does not yet re-export
+`./snapshot`, so the dynamically-imported package object has no `encodeSnapshot`
+property: `AssertionError: expected 'undefined' to be 'function'` at
+`expect(typeof pkg.encodeSnapshot).toBe('function')`.
+
+(This step's own count is unaffected by this brief's two added tests — Step 11
+targets a single test by name, not the whole file.)
+
+- [ ] **Step 12: Widen the barrel**
+
+In `packages/protocol/src/index.ts`. Before:
+
+```ts
+export * from './types'
+export * from './bits'
+export * from './quant'
+```
+
+After:
+
+```ts
+export * from './types'
+export * from './bits'
+export * from './quant'
+export * from './snapshot'
+```
+
+- [ ] **Step 13: Run the test to verify it passes, then the whole file and package**
+
+Run: `npx vitest run packages/protocol/test/snapshot.test.ts`
+Expected: PASS — 15 passed (14 from Steps 4/8, plus the barrel test).
+
+Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
+Expected: PASS — no TypeScript errors; every test across the package still passes,
+including Tasks 3, 4 and 5's own barrel tests, which this task's edit to
+`index.ts` does not touch.
+
+- [ ] **Step 14: Commit**
 
 ```bash
-git add packages/protocol/src/snapshot.ts packages/protocol/test/snapshot.test.ts
-git commit -m "feat(protocol): snapshot codec - encode/decode/apply against contract §4"
+git add packages/protocol/src/snapshot.ts packages/protocol/src/index.ts \
+        packages/protocol/test/snapshot.test.ts
+git commit -m "feat(protocol): snapshot codec - encode/decode/apply against contract §4
+
+Per-kart wire record is 178 bits, not 177: isBot and connected are two
+independent bits, matching contract §4's explicit ruling that they must never
+be merged (an earlier draft of this codec derived isBot as !connected on
+decode, which cannot represent the spec §5 bot-takeover/reconnect transition
+where the two legitimately disagree for a tick). The fourteen exact/enum
+per-kart fields have no Q/EPS entry (Task 5) and are sourced here as local
+bit-width constants instead, the same pattern already used for the entity and
+header fields.
+
+Also raises the worst-case buffer size from 512B to 1024B (743B is the actual
+worst case at 178 bits/kart -- BitWriter truncates silently past a buffer's
+end) and adds a MAX_ENTITIES round-trip test that would have caught it, plus
+a kart with isBot/connected deliberately disagreeing so the fix is actually
+exercised rather than coinciding with a test fixture's defaults.
+
+Two more fixes from this brief's residual-findings pass: lastProcessedInputTick
+is now +1-biased on the wire (matching events.ts's own scheme for
+playerId/entityId), so the -1 "no real input yet" sentinel round-trips as -1
+instead of silently becoming tick 65535; and applySnapshotToState now resets a
+re-sentinelled entity slot's targetId to -1, matching entity.ts's clearSlot
+convention, instead of leaving a despawned seeker's stale target reference
+behind for ShadowLoop.reconcile to inherit.
+
+Widens packages/protocol/src/index.ts to re-export snapshot.ts, so
+packages/net can reach these three functions through @tapkart/protocol from
+Task 11 onward instead of waiting for Task 18's barrel widening."
 ```

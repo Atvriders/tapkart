@@ -213,7 +213,7 @@ After:
 Run: `npx vitest run packages/sim/test/state.test.ts -t "initialises heldBotIntent"`
 Expected: PASS — 1 test.
 
-Note: `npx tsc --noEmit -p packages/sim` will still report errors at this point (the five hand-built `SimState` literals in other test files, per the scope note above). That is expected and is fixed in Step 18. `npx vitest run packages/sim` stays green in the meantime, because those five files never exercise `cloneState`/`statesEqual`/`resolveInputs` on their hand-built states in a way that reads the two new fields.
+Note: `npx tsc --noEmit -p packages/sim` will still report errors at this point (the five hand-built `SimState` literals in other test files, per the scope note above). That is expected and is fixed in Step 18. `npx vitest run packages/sim` stays green in the meantime — at this exact point in the task, only `types.ts` and `createState` (this step) have changed, and `cloneState`/`statesEqual`/`resolveInputs` do not read `heldBotIntent`/`heldBotTick` yet (Steps 7 and 11 add those reads), so nothing in the five hand-built-literal files can observe the missing fields at runtime yet. This stops being true once Step 7 lands — see Step 17's note below, which is the point two of those five files' own `step()`-calling tests start failing for real.
 
 ---
 
@@ -819,7 +819,7 @@ After:
   while (a.tick < toTick) {
 ```
 
-**`packages/sim/test/phase.test.ts`** — five edits.
+**`packages/sim/test/phase.test.ts`** — six edits.
 
 Edit 1, the import. Before:
 
@@ -1191,6 +1191,28 @@ Also delete `'is independent of a bot hold left dirty by an earlier run'`, in th
 
 After: delete the whole `it(...)` block above, keeping the `describe`'s other test (`'is bit-identical from an odd checkpoint tick'`) and the block's closing `})`.
 
+**Two imports are now dead and must go in the same step**, or `tsc` fails later at Step 19 with `noUnusedLocals`/`noUnusedParameters` errors (`tsconfig.base.json`). `COUNTDOWN_TICKS` was used only by the deleted `'accepts an even checkpoint tick with bot-driven karts during countdown'` test (`expect(T).toBeLessThan(COUNTDOWN_TICKS)`, part of the `describe('replayRun checkpoint parity guard', ...)` block this step's earlier edit already replaced); `makeIntentBuffer` and `resolveInputs` (from `../src/phase`) were used only by the `'is independent of a bot hold left dirty by an earlier run'` test just deleted above. Neither has any other reference left in this file.
+
+Before:
+
+```ts
+import { COUNTDOWN_TICKS, MAX_KARTS } from '../src/types'
+```
+
+After:
+
+```ts
+import { MAX_KARTS } from '../src/types'
+```
+
+Before:
+
+```ts
+import { makeIntentBuffer, resolveInputs } from '../src/phase'
+```
+
+After: delete this line entirely — nothing in the file calls either function anymore (Step 13 already removed `resetBotHold` from this same import).
+
 - [ ] **Step 15: Run test to verify it fails**
 
 Run: `npx vitest run packages/sim/test/replay.test.ts -t "replays bit-identically from an even checkpoint"`
@@ -1326,7 +1348,7 @@ Run: `npx vitest run packages/sim/test/replay.test.ts`
 Expected: PASS — every test in the file. The three deleted guard tests and the deleted dirty-hold test are gone from the count; nothing else in this file references `resetBotHold` or `needsOddCheckpoint` anymore.
 
 Run: `npx vitest run packages/sim`
-Expected: still FAIL — the five hand-built `SimState` literals (Step 18) are the only remaining breakage, and they are a `tsc`-only breakage (see the Step 4 note): `npx vitest run packages/sim` should actually be GREEN at this point, because none of those five files' tests exercise `cloneState`/`statesEqual`/`resolveInputs` on their hand-built states. Run it now to confirm; if anything besides those five files' own tests fails, stop and investigate before continuing — that would mean an assumption in this brief was wrong.
+Expected: FAIL — 2 failed, 474 passed, 1 skipped (477 total). By this point `cloneState`'s guard (Step 7) reads `dst.heldBotIntent.length`, and two of the five hand-built-`SimState` files do exercise `cloneState` at runtime, not just at the type level: `packages/sim/test/entity.test.ts`'s `describe('step() wiring', ...) > 'runs updateEntities once per tick, after the kart loop'` and `packages/sim/test/laps.test.ts`'s `describe('step() wiring', ...) > 'runs updateLaps for every kart as the last per-kart stage'` both build `prev`/`next` via this file's own `blankState()` helper (not yet widened — that is Step 18) and call `step(ctx, prev, next, inputs, events)`, which calls `cloneState(prev, next)` internally. Since `blankState()`'s literal has no `heldBotIntent` field until Step 18, `dst.heldBotIntent` is `undefined` and the guard throws `TypeError: Cannot read properties of undefined (reading 'length')`. The other three hand-built-literal files (`recovery.test.ts`, `collision.test.ts`, `placement.test.ts`) never call `step()`/`cloneState` on their hand-built states, so they stay green — this is a `tsc`-only breakage for those three, exactly as the Step 4 note describes, but not for these two. Proceed to Step 18, which fixes all five files' literals and resolves both failures.
 
 ---
 
@@ -1390,7 +1412,11 @@ After:
 - [ ] **Step 19: Run the whole suite and typecheck**
 
 Run: `npx vitest run packages/sim`
-Expected: PASS — every test in the package.
+Expected: PASS — 476 passed, 1 skipped (477 total). One more than the Plan 1
+baseline of 477: this task adds 1 (`'initialises heldBotIntent...'`) and 1
+(`'proves two SimStates never share a bot hold...'`), replaces 3 parity-guard
+tests with 1 new even-checkpoint test (net -2), and deletes 1 dirty-hold test
+(net -1): 477 + 1 + 1 - 2 - 1 = 476.
 
 Run: `npx tsc --noEmit -p packages/sim`
 Expected: no output, exit code 0. If any error remains, it names a file and line; re-check that file's literal against the pattern above before assuming a new defect.

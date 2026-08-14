@@ -19,12 +19,15 @@ two fixture functions Tasks 13–17 build on: `makeNetContext` (a real
   - `packages/net/src/transport.ts` [Task 11], same package, relative import
     `'./transport'` — `export interface Transport { ... }`, verbatim as
     written by Task 11.
-  - `packages/protocol/src/types.ts` [Task 3] — `ChannelName`, reached via
-    `'../../protocol/src/types'` from `packages/net/src/loopback.ts` (two
-    `..` — `src` → `net` → `packages`, then down into `protocol/src/types`).
-    Same reasoning as Task 11's `transport.ts`: `packages/protocol`'s barrel
-    is deferred to the shared Task 18 and is not populated yet when this task
-    runs.
+  - `packages/protocol/src/index.ts` [Task 3] — `ChannelName`, reached via
+    the `@tapkart/protocol` package specifier. Contract §3: "The barrel
+    exists from Task 3, not Task 18 ... net imports @tapkart/protocol,
+    always." Task 3's own scaffold step already re-exports `./types`, so by
+    the time this task runs (after Tasks 3–11), `@tapkart/protocol` resolves
+    `ChannelName` directly — the same fix applied to Task 11's `transport.ts`
+    (an earlier draft of this brief reached across with a relative path,
+    `'../../protocol/src/types'`, on the same now-superseded premise that
+    Task 11's brief made; that premise is corrected there too).
   - `packages/sim/src/rng.ts`, via the `@tapkart/sim` package specifier
     (sim's barrel is complete and merged, so this is an ordinary package
     import, unlike the protocol case above). Verified by reading the file
@@ -234,7 +237,7 @@ Create `packages/net/src/loopback.ts`:
 
 ```ts
 import { rngAt } from '@tapkart/sim'
-import type { ChannelName } from '../../protocol/src/types'
+import type { ChannelName } from '@tapkart/protocol'
 import type { Transport } from './transport'
 
 export interface LoopbackOptions {
@@ -483,7 +486,9 @@ npx vitest run packages/net packages/protocol
 
 Expected: no diagnostics; every test in both packages passes, including this
 task's 8 (`loopback.test.ts` 4, `net-fixtures.test.ts` 4) alongside Task 11's
-4 and Task 10's 2.
+5 (2 in `scaffold.test.ts`, 3 in `transport.test.ts` — Task 11's own
+residual-findings pass added a third transport test, so this figure no longer
+matches its original "4") and Task 10's 2.
 
 - [ ] **Step 10: Full repo sanity check**
 

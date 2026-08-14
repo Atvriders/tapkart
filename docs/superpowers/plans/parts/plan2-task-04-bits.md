@@ -434,9 +434,88 @@ Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
 Expected: PASS — no TypeScript errors; `bits.test.ts` 13 passed, plus whatever Task 3
 already shipped for `types.ts` (this task does not add or remove any of those).
 
-- [ ] **Step 10: Commit**
+---
+
+- [ ] **Step 10: Write the failing test — `BitWriter`/`BitReader` reachable through the barrel**
+
+Contract §3: "The barrel exists from Task 3, not Task 18" — Task 3 created
+`packages/protocol/src/index.ts` re-exporting only `./types`. Every module Tasks 4-10
+add must append its own `export * from './<module>'` line as its last implementation
+step, exactly as Plan 1's Tasks 3-10 each did for `@tapkart/sim/src/index.ts`, so that
+`packages/net` can `import ... from '@tapkart/protocol'` from Task 11 onward without
+waiting for Task 18. This task's module is `bits.ts`.
+
+Append to `packages/protocol/test/bits.test.ts`, after the closing `})` of
+`describe('BitWriter/BitReader: writeFloatQ/readFloatQ', ...)`:
+
+```ts
+describe('@tapkart/protocol barrel', () => {
+  it('re-exports BitWriter and BitReader', async () => {
+    const pkg = await import('@tapkart/protocol')
+    expect(typeof pkg.BitWriter).toBe('function')
+    expect(typeof pkg.BitReader).toBe('function')
+  })
+})
+```
+
+This is a dynamic import, matching Task 3's own barrel test in `types.test.ts` and
+`packages/sim/test/barrel.test.ts`'s `'resolves through the @tapkart/sim package entry
+point'` test, so a resolution failure fails this one test rather than the whole file.
+
+- [ ] **Step 11: Run the test to verify it fails**
+
+Run: `npx vitest run packages/protocol/test/bits.test.ts -t "re-exports BitWriter and BitReader"`
+
+Expected: FAIL — `packages/protocol/src/index.ts` currently re-exports only `./types`
+(Task 3), so the dynamically-imported package object has no `BitWriter`/`BitReader`
+property: `AssertionError: expected 'undefined' to be 'function'` at
+`expect(typeof pkg.BitWriter).toBe('function')`.
+
+- [ ] **Step 12: Widen the barrel**
+
+In `packages/protocol/src/index.ts`. Before:
+
+```ts
+// Public barrel for @tapkart/protocol.
+//
+// packages/protocol/package.json maps "." to this file. Task 3 re-exports only
+// types.ts; Task 18 widens this list to every module this package ends up with
+// (bits, quant, snapshot, checkpoint, events, input), mirroring exactly what
+// Plan 1's Task 2 -> Task 18 did for packages/sim/src/index.ts.
+export * from './types'
+```
+
+After:
+
+```ts
+// Public barrel for @tapkart/protocol.
+//
+// packages/protocol/package.json maps "." to this file. Each module task (3-10)
+// appends its own line here as its last implementation step, exactly as Plan 1's
+// Tasks 3-10 did for packages/sim/src/index.ts. Task 18 only adds the
+// no-ambiguous-export test; every export line already exists by then.
+export * from './types'
+export * from './bits'
+```
+
+- [ ] **Step 13: Run the test to verify it passes, then the whole file and package**
+
+Run: `npx vitest run packages/protocol/test/bits.test.ts`
+Expected: PASS — 14 passed (13 from Steps 4/8, plus the barrel test).
+
+Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
+Expected: PASS — no TypeScript errors; every test across the package still passes,
+including Task 3's own barrel test (`types.test.ts`'s `'resolves through the package
+entry point'`), which this task's edit to `index.ts` does not touch.
+
+- [ ] **Step 14: Commit**
 
 ```bash
-git add packages/protocol/src/bits.ts packages/protocol/test/bits.test.ts
-git commit -m "feat(protocol): LSB-first bit-packed wire codec primitives (BitWriter/BitReader)"
+git add packages/protocol/src/bits.ts packages/protocol/src/index.ts \
+        packages/protocol/test/bits.test.ts
+git commit -m "feat(protocol): LSB-first bit-packed wire codec primitives (BitWriter/BitReader)
+
+Widens packages/protocol/src/index.ts to re-export bits.ts, so packages/net
+can reach BitWriter/BitReader through @tapkart/protocol from Task 11 onward
+instead of waiting for Task 18's barrel widening."
 ```

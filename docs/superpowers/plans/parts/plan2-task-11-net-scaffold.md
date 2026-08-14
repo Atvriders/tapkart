@@ -34,39 +34,36 @@ layer knows which implementation is in use."*
     ['packages/*/test/**/*.test.ts']`, `environment: 'node'`, `globals:
     false` — this new workspace is discovered automatically once its test
     files exist; nothing in the root config needs to change.
-  - `packages/protocol/src/types.ts` [Task 3] — `export type ChannelName =
-    'unreliable' | 'reliable'`. **Reached by a relative import
-    (`'../../protocol/src/types'`), not the `@tapkart/protocol` package
-    specifier, and this is load-bearing, not a style choice:** the contract's
-    module map lists `packages/protocol/src/index.ts` as **[Task 18]** — the
-    same shared barrel task that also fills in `packages/net/src/index.ts`
-    (see below). By the time this task runs, Tasks 3–9 have executed and
-    `packages/protocol/src/types.ts` exists on disk with `ChannelName`
-    exported, but `packages/protocol/src/index.ts` is still the empty `export
-    {}` stub — mirroring exactly how `packages/sim/src/index.ts` stayed
-    `export {}` from Task 1 until Task 2 filled it. `packages/protocol`'s
-    `package.json` almost certainly mirrors `packages/sim`'s (`"exports": {
-    ".": "./src/index.ts" }`, nothing else), by the same pattern this task
-    itself follows below — which means resolving `@tapkart/protocol` as a
-    bare specifier before Task 18 lands would hit that still-empty barrel and
-    find no `ChannelName` at all. A plain relative path bypasses the package
-    "exports" map entirely (that map only governs bare-specifier resolution
-    through `node_modules`) and reaches the real file directly, which is why
-    it is the correct choice here, not merely a workaround. *I could not
-    literally open `packages/protocol/package.json` to confirm this — it
-    does not exist yet in this repo. This is a structural inference from the
-    contract's own task labels, stated as such rather than as a verified
-    fact.*
+  - `packages/protocol/src/index.ts` [Task 3] — `export type ChannelName =
+    'unreliable' | 'reliable'`, reachable via `@tapkart/protocol`. **Reached
+    by the bare package specifier, never a relative path across the package
+    boundary — this is load-bearing, not a style choice.** Contract §3 is
+    explicit: "The barrel exists from Task 3, not Task 18. Task 3's scaffold
+    creates `packages/protocol/src/index.ts` already re-exporting `./types`
+    ... `net` imports `@tapkart/protocol`, always." By the time this task
+    runs, Tasks 3–10 have executed: `packages/protocol/src/types.ts` exists
+    with `ChannelName` exported, and `packages/protocol/src/index.ts` already
+    re-exports it — that is Task 3's own scaffold step, not deferred to
+    Task 18. (An earlier draft of this brief argued the protocol barrel
+    stayed empty until Task 18 and reached `ChannelName` by a relative path,
+    `'../../protocol/src/types'`, instead. That argument is superseded by the
+    amended contract, and the relative-path approach is exactly what
+    contract §3 forbids: "punches through the package boundary, bypasses the
+    `exports` map, and would survive into Plan 3.")
 
 - Produces:
   - Workspace `@tapkart/net` at `packages/net`, `"type": "module"`, exporting
     `"."` as `./src/index.ts`, depending on `@tapkart/sim` and
     `@tapkart/protocol`.
-  - `packages/net/src/index.ts` — an empty barrel (`export {}`), exactly
-    mirroring Task 1's role for `packages/sim`. The shared Task 18 (see the
-    contract's module map: both `packages/protocol/src/index.ts` and
-    `packages/net/src/index.ts` are labeled **[Task 18]**) replaces its body
-    with real re-exports once every `net` module exists.
+  - `packages/net/src/index.ts` — starts as an empty barrel (`export {}`,
+    Step 5) while `transport.ts` doesn't exist yet, then is widened to
+    `export * from './transport'` (Step 10) once it does. Contract §3: "The
+    same applies to `packages/net/src/index.ts`: Task 11's scaffold creates
+    it re-exporting `./transport`, Task 18 widens it." This task, not
+    Task 18, is responsible for the barrel carrying `./transport` by the
+    time it finishes; Task 18 only adds the remaining five modules
+    (`loopback`, `apply`, `authority`, `client`, `shadow`) once Tasks 12–16
+    ship them.
   - `export interface Transport { send(channel: ChannelName, peerId: string,
     data: Uint8Array): void; broadcast(channel: ChannelName, data:
     Uint8Array): void; onMessage(cb: (peerId: string, channel: ChannelName,
@@ -212,7 +209,8 @@ Create `packages/net/test/transport.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
 import type { Transport } from '../src/transport'
-import type { ChannelName } from '../../protocol/src/types'
+import type { Transport as BarrelTransport } from '../src/index'
+import type { ChannelName } from '@tapkart/protocol'
 
 interface RecordingTransport extends Transport {
   sent: { channel: ChannelName; peerId: string; data: Uint8Array }[]
@@ -290,6 +288,20 @@ describe('Transport interface', () => {
     for (const c of channels) fake.send(c, 'peerB', new Uint8Array())
     expect(fake.sent.map((s) => s.channel)).toEqual(['unreliable', 'reliable'])
   })
+
+  it('is reachable through the package barrel, structurally identical to the direct import', () => {
+    // The real assertion here is that this file compiles at all:
+    // BarrelTransport resolves only once packages/net/src/index.ts
+    // re-exports transport.ts (Step 10). Contract §3/§5: "Task 11's scaffold
+    // creates it re-exporting ./transport." Before Step 10 this import fails
+    // tsc with TS2305 ("no exported member 'Transport'"), exactly like
+    // Step 8's TS2307 for ../src/transport before Step 9 -- two separate
+    // barrel-boundary defects, fixed by two separate steps.
+    const fake = makeFakeTransport()
+    const viaBarrel: BarrelTransport = fake
+    const viaDirect: Transport = viaBarrel
+    expect(viaDirect).toBe(fake)
+  })
 })
 ```
 
@@ -297,33 +309,43 @@ describe('Transport interface', () => {
 
 Run: `npx tsc --noEmit -p packages/net`
 
-Expected: exactly one diagnostic — `test/transport.test.ts(2,30): error
-TS2307: Cannot find module '../src/transport' or its corresponding type
-declarations.` (the line/column will differ slightly depending on exact
-formatting, but the code and message are `TS2307` /
-`Cannot find module '../src/transport' or its corresponding type
-declarations.`).
+Expected: exactly **two** diagnostics, from two independent missing exports —
+`transport.ts` doesn't exist yet (Step 9) and `index.ts` doesn't re-export
+`Transport` yet (Step 10):
+
+```
+test/transport.test.ts(3,30): error TS2307: Cannot find module '../src/transport' or its corresponding type declarations.
+test/transport.test.ts(4,36): error TS2305: Module '"../src/index"' has no exported member 'Transport'.
+```
+
+(Line/column will differ slightly with exact formatting, but both codes and
+messages are as shown.) Resolving the first requires Step 9; resolving the
+second requires Step 10 — these are genuinely two separate defects, not one
+reported twice.
 
 **Do not** run `npx vitest run packages/net/test/transport.test.ts` and
 expect it to fail — it will not. Every reference to `Transport` in this test
 file is a type-only import and a type position; under this project's
 `verbatimModuleSyntax` + Vite/esbuild transform, that import is erased
 entirely before module resolution happens, so the test collects and passes
-even though `transport.ts` does not exist. This was confirmed directly by
-experiment, not assumed. `tsc` is the only oracle for this step.
+even though `transport.ts` does not exist and `index.ts` doesn't re-export
+it. This was confirmed directly by experiment, not assumed. `tsc` is the only
+oracle for this step.
 
 - [ ] **Step 9: Implement `packages/net/src/transport.ts`**
 
 Create `packages/net/src/transport.ts`:
 
 ```ts
-import type { ChannelName } from '../../protocol/src/types'
+import type { ChannelName } from '@tapkart/protocol'
 
 /**
  * One interface, three implementations (WebRTC, WebSocket, Loopback). Spec
  * §5: "Nothing above the transport layer knows which implementation is in
  * use." Two channels, named by the exact strings 'unreliable' and 'reliable'
- * -- ChannelName is imported from protocol, not redefined here.
+ * -- ChannelName is imported from @tapkart/protocol's barrel, not redefined
+ * here and not reached by a relative path (contract §3: "net imports
+ * @tapkart/protocol, always").
  */
 export interface Transport {
   send(channel: ChannelName, peerId: string, data: Uint8Array): void
@@ -335,19 +357,52 @@ export interface Transport {
 }
 ```
 
-- [ ] **Step 10: Run both checks to verify they pass**
+Run: `npx tsc --noEmit -p packages/net`
 
-Run:
+Expected: exactly **one** diagnostic remains — the same `TS2305` from Step 8,
+unchanged, because `index.ts` still hasn't been widened:
 
-```bash
-npx tsc --noEmit -p packages/net
-npx vitest run packages/net/test/transport.test.ts
+```
+test/transport.test.ts(4,36): error TS2305: Module '"../src/index"' has no exported member 'Transport'.
 ```
 
-Expected: `tsc` reports no diagnostics. `vitest` reports `Test Files 1 passed
-(1)`, `Tests 2 passed (2)` — now meaningfully, since `Transport` resolves to
-a real interface and the object literals in the test are structurally
-checked against it by `tsc` in the step above.
+This confirms `transport.ts` alone resolves the `TS2307` half of Step 8's RED
+and nothing else — the barrel still needs Step 10.
+
+- [ ] **Step 10: Widen the barrel to re-export `transport.ts`**
+
+Contract §3/§5: "Task 11's scaffold creates it re-exporting `./transport`,
+Task 18 widens it." Replace `packages/net/src/index.ts`'s content. Before:
+
+```ts
+// Public barrel for @tapkart/net. Task 18 replaces this line with re-exports
+// of transport, loopback, apply, authority, client and shadow. The bare
+// `export {}` keeps the file a module under isolatedModules while it is
+// still empty -- the same role packages/sim/src/index.ts played from Task 1
+// until Task 2 filled it in.
+export {}
+```
+
+After:
+
+```ts
+// Public barrel for @tapkart/net.
+//
+// Task 11 re-exports only transport.ts; Task 18 widens this list to every
+// module this package ends up with (transport, loopback, apply, authority,
+// client, shadow), mirroring exactly what Task 3 -> Task 18 did for
+// packages/protocol/src/index.ts and what Plan 1's Task 1 -> Task 2 did for
+// packages/sim/src/index.ts.
+export * from './transport'
+```
+
+Run: `npx tsc --noEmit -p packages/net`
+Expected: no output, exit code 0 — both Step 8 diagnostics are now resolved.
+
+Run: `npx vitest run packages/net/test/transport.test.ts`
+Expected: `Test Files 1 passed (1)`, `Tests 3 passed (3)` — the third test
+(added in Step 7) is meaningful for the first time: it only compiles because
+`BarrelTransport` genuinely resolves through `../src/index`.
 
 - [ ] **Step 11: Full package and repo sanity check**
 
@@ -362,8 +417,15 @@ npm test
 
 Expected: all four commands exit 0. `npm test` includes both new test files
 (`packages/net/test/scaffold.test.ts`, `packages/net/test/transport.test.ts`)
-alongside every existing `packages/sim` test — 477 from Plan 1 plus this
-task's 4.
+alongside every existing `packages/sim`/`packages/protocol` test. This task
+adds exactly 5 tests of its own (2 in `scaffold.test.ts`, 3 in
+`transport.test.ts` after Step 7's addition) — confirm the total increases by
+exactly 5 relative to whatever `npm test` reported immediately before this
+task started, rather than trusting one absolute number stated here: Tasks 1–2
+already changed `packages/sim`'s count from Plan 1's 477, and Tasks 3–10 have
+each added their own tests to `packages/protocol` by the time this task runs,
+so no single absolute figure in this brief can stay accurate across the whole
+plan.
 
 - [ ] **Step 12: Commit**
 
@@ -375,20 +437,25 @@ git add packages/net/package.json packages/net/tsconfig.json \
 git commit -m "feat(net): scaffold the @tapkart/net workspace and the Transport interface
 
 Mirrors @tapkart/sim's package.json/tsconfig.json shape exactly:
-'exports' mapping only '.', an empty barrel until the shared Task 18
-fills it in, no devDependencies beyond the root's hoisted vitest and
-typescript. Depends on @tapkart/sim and @tapkart/protocol.
+'exports' mapping only '.', a barrel that starts empty and is widened
+to re-export transport.ts by the end of this same task (contract §3:
+'Task 11's scaffold creates it re-exporting ./transport'), no
+devDependencies beyond the root's hoisted vitest and typescript.
+Depends on @tapkart/sim and @tapkart/protocol.
 
 Transport is the one seam above which nothing knows which of WebRTC,
 WebSocket or Loopback is in use: six methods, two channels named
-'unreliable' and 'reliable' via protocol's ChannelName. Reached by a
-relative import into packages/protocol/src/types rather than the
-package specifier, because protocol's own barrel is deferred to the
-same Task 18 that fills this package's -- resolving '@tapkart/protocol'
-before then would hit an empty module.
+'unreliable' and 'reliable' via protocol's ChannelName, imported as
+'@tapkart/protocol' -- protocol's own barrel has re-exported ChannelName
+since Task 3, so net never reaches across the package boundary with a
+relative path.
 
 transport.ts has no runtime code, so its RED/GREEN is checked with tsc
 --noEmit, not vitest run: a type-only import of a missing module is
 erased by this project's esbuild transform before resolution and would
-otherwise pass silently, confirmed by direct experiment."
+otherwise pass silently, confirmed by direct experiment. The barrel
+widening carries the same trap: net's own index.ts re-exports only a
+type, so its RED is a second, independent tsc diagnostic (TS2305),
+resolved by its own dedicated step rather than folded silently into
+transport.ts's."
 ```

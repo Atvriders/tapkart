@@ -19,6 +19,16 @@
   - `packages/sim/src/entity.ts` — `export function kartById(state: SimState, playerId: number): KartState | null`,
     a linear scan of `state.karts` returning `null` when no kart's `playerId`
     matches (in particular for `playerId === -1`, the finish-sentinel value).
+  - `packages/sim/src/items.ts` — `export function applyItemGrant(ctx: SimContext, state: SimState, ev: AuthEvent): void`,
+    already shipped in Plan 1 and already barrel-exported (`packages/sim/src/index.ts`
+    has `export * from './items'`). Read directly: it returns early unless
+    `ev.kind === 'itemGrant'`, looks the kart up with `kartById`, sets
+    `k.item = ev.item`, and — the half a hand-rolled `k.item = ev.item` would
+    miss — puts the *item box* named by `ev.data` back on its respawn timer
+    (`if (box.respawnTicks <= 0) box.respawnTicks = ctx.tuning.itemBoxRespawnTicks`).
+    Its own doc comment states the reason: *"`ev.data` carries the boxIdx, so a
+    follower that missed the local pickup (fresh join, post-resync) still puts
+    the box on its respawn timer."*
   - `packages/sim/src/state.ts` — `export function createState(ctx: SimContext, seed: number, characterIdx: number[]): SimState`,
     used only by this task's tests.
   - `packages/net/test/fixtures/net-fixtures.ts` [Task 12, locked contract §6] —
@@ -73,7 +83,19 @@ two more categories:
    `rollItem` returns `'none'` unconditionally (`if (!ctx.isLeader) return 'none'`,
    `items.ts`), so a follower's own kart's `k.item` never becomes anything but
    `'none'` through local simulation. The granted item exists nowhere except
-   the event. **Must apply:** `k.item = ev.item`.
+   the event. **Must apply — and both halves of it, not just the kart's.**
+   `updateItemBoxes` emits `emit(state, events, 'itemGrant', k.playerId, -1, item, box.boxIdx)`,
+   so `ev.data` is the **box index**, and the pickup has two consequences: the
+   kart holds the item *and* that box goes onto its respawn timer. Only the
+   first is visible in `WireKart`; a box's `respawnTicks` is in neither
+   `WireSnapshot` nor any other event, so a peer that never simulated the
+   pickup — a `ClientLoop`, which never predicts remote karts — would keep
+   offering a box the authority has already consumed. `packages/sim/src/items.ts`
+   already ships exactly this operation as `applyItemGrant(ctx, state, ev)`,
+   written for this path and tested in Plan 1, so `applyEvent` delegates to it
+   rather than re-deriving half of it. **This is the one case where `applyEvent`
+   reuses a sim function instead of writing its own fields** — the exception is
+   deliberate and the reason is below.
 
 2. **`hit` and the `spinOut` that follows an unshielded hit
    (`entity.ts` lines ~250–262) — caused by an entity the receiver never
@@ -88,9 +110,15 @@ two more categories:
    **Must apply.** `entity.ts`'s emit call is `emit(state, events, 'hit', k.playerId, e.entityId, e.kind, 1)`
    when a shield absorbed the hit and `... 0)` when it did not (the shield-clear,
    `k.shielded = false`, happens in the same branch as the `1` emit, immediately
-   before it). The immediately following `startSpinOut(state, k, ctx.tuning.spinOutTicks, events)`
-   call (only reached on the `0`/unshielded branch) is what actually emits
-   `'spinOut'`; `startSpinOut` (`recovery.ts`) sets
+   before it). The immediately following `startSpinOut(…)` call (only reached on
+   the `0`/unshielded branch) is what actually emits `'spinOut'`. *That call site
+   is **not** quoted with a parameter list here, deliberately:* Plan 1 ships
+   `startSpinOut(state, k, ticks, events)`, and Plan 2 Task 2 re-signs it to
+   take `ctx` (locked contract §2a) before this task runs — so any parameter
+   list written here would be stale on the day this brief executes. Nothing in
+   this task calls `startSpinOut`; only its *effect* on `KartState` matters
+   below, and that effect is unchanged by the re-signing.
+   `startSpinOut` (`recovery.ts`) sets
    `k.spinOutTicks = ticks; k.drift.active = false; k.drift.dir = 0; k.drift.charge = 0; k.boostTicks = 0`
    before its own `emit(state, events, 'spinOut', k.playerId, -1, 'none', ticks)`.
 
@@ -151,7 +179,7 @@ The resulting table, `data`'s meaning per kind, all six citations above:
 
 | kind | `playerId` means | mutation |
 |---|---|---|
-| `itemGrant` | kart granted the item | `k.item = ev.item` |
+| `itemGrant` | kart granted the item | `applyItemGrant(ctx, state, ev)`: `k.item = ev.item` **and** item box `ev.data` goes onto `ctx.tuning.itemBoxRespawnTicks` |
 | `hit` | kart that was hit | `data === 1`: `k.shielded = false`. `data === 0`: none (the following `spinOut` event carries the real consequence) |
 | `spinOut` | kart spinning out | `k.spinOutTicks = ev.data`; clear `drift.active`, `drift.dir`, `drift.charge`, `boostTicks` to their zero values, exactly mirroring `startSpinOut` |
 | `respawn` | kart respawning | `k.respawnTicks = ev.data` |
@@ -160,9 +188,14 @@ The resulting table, `data`'s meaning per kind, all six citations above:
 | `finish`, `playerId === -1` | (sentinel: the race itself) | `state.phase = 'finished'` |
 | `entitySpawn` / `entityDespawn` | owner of the entity | none — sequencing only |
 
-**Why `applyEvent` does not call `startSpinOut`, `beginRespawn`, `spawnEntity`
-or `despawnEntityAt` to perform these mutations, even though those functions
-already exist and already do adjacent work.** All four are written for the
+**Why `applyEvent` calls `applyItemGrant` but does not call `startSpinOut`,
+`beginRespawn`, `spawnEntity` or `despawnEntityAt`.** `applyItemGrant` is the
+one sim function in this list written *for the receiving side*: its doc comment
+says so ("Follower path for an authoritative item grant"), it emits nothing, it
+has no leader-side entry guard, and it is the sole owner of the box-timer half
+of a grant. Re-deriving it here would duplicate a tested function and, worse,
+would silently drift from it the first time `items.ts` changes what a pickup
+costs. The other four are the opposite case. All four are written for the
 *leader's forward simulation* and carry guards appropriate to that context but
 wrong for a receiver trusting the wire: `startSpinOut` refuses a shorter spin
 than the one already running (`if (ticks <= k.spinOutTicks) return`) — correct
@@ -176,22 +209,24 @@ through for no purpose. `applyEvent` performs its own narrow, unconditional
 field writes instead, four to six lines each, matching only the *effect* those
 functions have on `KartState`/`SimState`, never their entry guards.
 
-**Why the first parameter is `_ctx`, not `ctx`.** The locked contract's
-signature is `applyEvent(ctx: SimContext, state: SimState, ev: AuthEvent): boolean`,
-and this task's implementation has no need to branch on anything in `ctx` — the
-gating this function performs is purely on `ev.eventSeq` versus
-`state.nextEventSeq`, and every mutation is unconditional once that gate
-passes. `tsconfig.base.json` sets `"noUnusedParameters": true`, and TypeScript
-5.9 (confirmed by direct compilation against this exact tsconfig: an unused
-leading parameter is flagged even though two later parameters in the same
-function are used — TS does **not** exempt unused parameters merely for
-preceding a used one) flags an unused, non-underscore-prefixed parameter with
-`TS6133`. Renaming it to `_ctx` (confirmed by the same direct compilation to be
-exempt) satisfies the linter without violating the contract: TypeScript
-parameter names carry no meaning for a caller — only the positional types do —
-so `_ctx: SimContext` in this position is exactly the same type as `ctx: SimContext`
-to every caller. The parameter stays in the signature (a future task may need
-it; nothing here forbids that) — it is simply unread by this implementation.
+**Why the first parameter is `ctx` and stays named `ctx`.** The locked
+contract's signature is
+`applyEvent(ctx: SimContext, state: SimState, ev: AuthEvent): boolean`. This
+implementation reads `ctx` in exactly one place — it hands it to
+`applyItemGrant`, which needs `ctx.tuning.itemBoxRespawnTicks` — so the
+parameter is genuinely consumed and needs no underscore.
+
+That is worth stating because an earlier draft of this brief named it `_ctx`
+and explained at length why: `tsconfig.base.json` sets
+`"noUnusedParameters": true`, and TypeScript 5.9 (confirmed by direct
+compilation against this exact tsconfig) flags an unused *leading* parameter
+with `TS6133` even when later parameters in the same function are used — it
+does **not** exempt a parameter merely for preceding a used one. That finding
+is still true and still relevant to Tasks 14–16, but it no longer applies here.
+**Do not "simplify" the `itemGrant` case back to a bare `k.item = ev.item`:**
+doing so drops the item box's respawn timer *and* makes `ctx` unused again,
+and `TS6133` is the only thing that would tell you — a follower quietly
+re-offering a consumed box is not a compile error.
 
 ---
 
@@ -220,13 +255,16 @@ describe('applyEvent — sequencing', () => {
 
     expect(applyEvent(ctx, state, ev)).toBe(true)
     expect(state.karts[2].item).toBe('boost')
+    expect(state.itemBoxes[0].respawnTicks).toBe(ctx.tuning.itemBoxRespawnTicks)
     expect(state.nextEventSeq).toBe(1)
 
-    // Something else changes the field between the two applications, so the
-    // second call re-writing it would be observable, not just a matching no-op.
+    // Both fields are changed between the two applications, so the second call
+    // re-writing EITHER of them would be observable, not just a matching no-op.
     state.karts[2].item = 'seeker'
+    state.itemBoxes[0].respawnTicks = 0
     expect(applyEvent(ctx, state, ev)).toBe(false)
-    expect(state.karts[2].item).toBe('seeker')  // untouched: the 2nd apply did nothing
+    expect(state.karts[2].item).toBe('seeker')       // untouched: the 2nd apply did nothing
+    expect(state.itemBoxes[0].respawnTicks).toBe(0)  // and did not re-arm the box either
     expect(state.nextEventSeq).toBe(1)
   })
 
@@ -262,15 +300,34 @@ describe('applyEvent — sequencing', () => {
 })
 
 describe('applyEvent — per-kind mutation', () => {
-  it('itemGrant sets the kart\'s item', () => {
+  it('itemGrant sets the kart\'s item AND puts the named box on its respawn timer', () => {
     const ctx = makeNetContext(false)
     const state = createState(ctx, SEED, CHARS)
+    // data is the boxIdx (items.ts: emit(..., 'itemGrant', k.playerId, -1, item, box.boxIdx)).
     const ev: AuthEvent = {
       eventSeq: 0, tick: 1, kind: 'itemGrant',
       playerId: 5, entityId: -1, item: 'bubble', data: 3,
     }
+    expect(state.itemBoxes.length).toBeGreaterThan(3)  // the oval fixture ships 6 boxes
+    expect(state.itemBoxes[3].respawnTicks).toBe(0)
     expect(applyEvent(ctx, state, ev)).toBe(true)
     expect(state.karts[5].item).toBe('bubble')
+    expect(state.itemBoxes[3].respawnTicks).toBe(ctx.tuning.itemBoxRespawnTicks)
+    // and only that box: a receiver must not blanket-arm the whole track.
+    expect(state.itemBoxes[0].respawnTicks).toBe(0)
+    expect(state.itemBoxes[4].respawnTicks).toBe(0)
+  })
+
+  it('itemGrant with a data value outside the box array still grants the item', () => {
+    const ctx = makeNetContext(false)
+    const state = createState(ctx, SEED, CHARS)
+    const ev: AuthEvent = {
+      eventSeq: 0, tick: 1, kind: 'itemGrant',
+      playerId: 5, entityId: -1, item: 'bubble', data: 999,
+    }
+    expect(applyEvent(ctx, state, ev)).toBe(true)
+    expect(state.karts[5].item).toBe('bubble')
+    for (const box of state.itemBoxes) expect(box.respawnTicks).toBe(0)
   })
 
   it('hit with data 1 clears the shield', () => {
@@ -417,6 +474,7 @@ describe('applyEvent — a realistic multi-tick sequence', () => {
 
     expect(state.nextEventSeq).toBe(6)
     expect(state.karts[3].item).toBe('seeker')
+    expect(state.itemBoxes[0].respawnTicks).toBe(ctx.tuning.itemBoxRespawnTicks)
     expect(state.karts[3].lap.lap).toBe(2)
     expect(state.karts[3].lap.checkpointIdx).toBe(0)
     expect(state.karts[5].spinOutTicks).toBe(60)
@@ -425,11 +483,23 @@ describe('applyEvent — a realistic multi-tick sequence', () => {
 
     // Replaying the exact same six events again — as would happen if the
     // reliable channel redelivered a batch the peer had already applied — must
-    // change nothing, in one pass, in order.
+    // change nothing, in one pass, in order. Every field the six events wrote
+    // is scrambled first, so a re-application is observable on every one of
+    // them rather than being hidden by an identical rewrite.
+    state.karts[3].item = 'none'
+    state.itemBoxes[0].respawnTicks = 0
+    state.karts[3].lap.lap = 9
+    state.karts[5].spinOutTicks = 0
+    state.finishedOrder[0] = -1
     for (const ev of events) {
       expect(applyEvent(ctx, state, ev)).toBe(false)
     }
     expect(state.nextEventSeq).toBe(6)
+    expect(state.karts[3].item).toBe('none')
+    expect(state.itemBoxes[0].respawnTicks).toBe(0)
+    expect(state.karts[3].lap.lap).toBe(9)
+    expect(state.karts[5].spinOutTicks).toBe(0)
+    expect(state.finishedOrder[0]).toBe(-1)
   })
 })
 ```
@@ -467,7 +537,7 @@ Create `packages/net/src/apply.ts`:
 
 ```ts
 import type { AuthEvent, SimContext, SimState } from '@tapkart/sim'
-import { kartById } from '@tapkart/sim'
+import { applyItemGrant, kartById } from '@tapkart/sim'
 
 /**
  * The follower's half of the emit-gating rule (locked contract §1b, §5).
@@ -495,14 +565,16 @@ import { kartById } from '@tapkart/sim'
  * `entitySpawn`/`entityDespawn` carry no position (AuthEvent has no Vec3 field
  * at all) and mutate nothing; entity truth is exclusively WireSnapshot's job.
  */
-export function applyEvent(_ctx: SimContext, state: SimState, ev: AuthEvent): boolean {
+export function applyEvent(ctx: SimContext, state: SimState, ev: AuthEvent): boolean {
   if (ev.eventSeq < state.nextEventSeq) return false
   state.nextEventSeq = ev.eventSeq + 1
 
   switch (ev.kind) {
     case 'itemGrant': {
-      const k = kartById(state, ev.playerId)
-      if (k !== null) k.item = ev.item
+      // Both halves of a pickup: the kart's item AND the box's respawn timer
+      // (ev.data is the boxIdx). packages/sim/src/items.ts owns this operation
+      // and is written for exactly this receiving path - see the brief.
+      applyItemGrant(ctx, state, ev)
       return true
     }
     case 'hit': {
@@ -559,12 +631,13 @@ export function applyEvent(_ctx: SimContext, state: SimState, ev: AuthEvent): bo
 
 Run: `npx vitest run packages/net/test/apply.test.ts`
 
-Expected: PASS — 12 tests. (This exact implementation and an equivalent test
+Expected: PASS — 13 tests. (This exact implementation and an equivalent test
 file were run against the real, currently-merged `packages/sim` during the
 writing of this brief, via temporary files under `packages/sim/test/` importing
 `packages/sim/src` by relative path in place of `@tapkart/sim` — 10 tests in
 that dry run, split into 12 here after separating two assertions in the
-sequencing tests into their own `it` blocks for a clearer failure signal. Both
+sequencing tests into their own `it` blocks for a clearer failure signal, plus
+one more added by the fix pass for the item-box half of an `itemGrant`. Both
 `npx vitest run` and `npx tsc --noEmit -p packages/sim/tsconfig.json` were
 green on that dry run before it was deleted; no source of this brief is
 untested reasoning.)
@@ -573,7 +646,7 @@ untested reasoning.)
 
 Run: `npx tsc --noEmit -p packages/net/tsconfig.json && npx vitest run packages/net`
 
-Expected: PASS, zero type errors, every `net` test green (this task's 12 plus
+Expected: PASS, zero type errors, every `net` test green (this task's 13 plus
 whatever Tasks 11–12 already shipped).
 
 - [ ] **Step 6: Commit**
@@ -589,7 +662,9 @@ the highest already applied, which is what makes authority migration
 safe.
 
 Per-kind mutation is real, not uniform bookkeeping: itemGrant (leader-only
-PRNG roll), hit/spinOut (caused by an entity the receiver never
+PRNG roll - delegated to sim's own applyItemGrant so the item box's
+respawn timer, the half no WireSnapshot field carries, is applied too),
+hit/spinOut (caused by an entity the receiver never
 simulated - 'the local kart's hit reaction plays on receipt, not on
 prediction', spec 5) and finish (WireSnapshot carries no placement data
 at all) all carry information a receiver cannot derive by re-simulating

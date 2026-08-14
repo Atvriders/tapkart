@@ -56,11 +56,12 @@ because it applies to every step below.
   export function quantStep(min: number, max: number, bits: number): number
   ```
 
-- **Flagged ambiguity — `QuantTable`/`EpsilonTable`'s per-field shape is not
-  specified anywhere in the locked contract.** §3 gives only the top-level
-  export names and type names; §4 is explicitly prose ("the table is prose
-  and the constants are code" — contract §4, verbatim). This brief therefore
-  **pins a required shape** and this is the single biggest risk in this task:
+- **`QuantTable`/`EpsilonTable`'s per-field shape is locked by contract §3**,
+  not merely assumed by this brief. (An earlier draft of this brief was
+  written before that amendment landed and described the shape below as an
+  unresolved ambiguity this brief was pinning on its own authority. That
+  framing is stale and is corrected here — the shape is no longer this
+  brief's own choice, it is the contract's.)
 
   ```ts
   export interface QuantField { min: number; max: number; bits: number }
@@ -82,32 +83,35 @@ because it applies to every step below.
   }
   ```
 
-  Two things about this shape are deliberate, not arbitrary:
-  1. Only the six **continuous** ("band"-compared) rows of contract §4 get an
-     entry. The other eleven rows (`spinOutTicks`, `lap`, `item`, `playerId`,
-     …) are marked "exact" / `Object.is` in §4 — they carry no quantization
-     noise and therefore need no epsilon at all, so they are not part of
-     `EpsilonTable`.
-  2. The sixth key is **`t`, not `lap.t` and not `lapT`.** Contract §4's row
-     is written `lap.t` because that is where the quantity lives inside
-     `KartState` (`k.lap.t`), but contract §3's **locked** `WireKart`
-     interface — the actual encode/decode target — declares it as a flat
-     sibling field: `lap: number; checkpointIdx: number; t: number`. The
-     locked interface is the more authoritative source than the prose table's
-     dotted notation, so `t` is used here.
-  3. `QuantTable` is required to expose raw `{min, max, bits}` rather than a
-     precomputed `step`, deliberately. `quantStep` is exported as its own
-     function specifically so a consumer can *recompute* a field's step from
-     its raw parameters rather than trust a value someone hand-typed — that
-     recomputation is exactly what claim (b) below needs, and it means this
-     test never hardcodes a single decimal step or epsilon value copied from
-     the prose table.
+  This is contract §3 verbatim. Two things about the shape are worth stating
+  explicitly, both taken directly from contract §4 rather than inferred:
+  1. Only the six **continuous** ("band"-compared) rows get an entry. The
+     other eleven rows (`spinOutTicks`, `lap`, `item`, `playerId`, …) are
+     marked "exact" / `Object.is` in §4 — they carry no quantization noise
+     and therefore need no epsilon at all: "giving them one would invite
+     someone to compare an integer with a tolerance" (contract §4, verbatim).
+  2. The sixth key is **`t`, not `lap.t` and not `lapT`.** Contract §4 states
+     this outright: "The key is `t`, not `lap.t`, matching the flat
+     `WireKart` interface in §3." Contract §3's `WireKart` declares it as a
+     flat sibling field, `lap: number; checkpointIdx: number; t: number`, not
+     nested the way it lives inside `KartState` (`k.lap.t`).
+  3. `QuantTable` deliberately exposes raw `{min, max, bits}` rather than a
+     precomputed `step` — contract §4, verbatim: "`QuantTable` deliberately
+     exposes raw `{min, max, bits}` rather than a precomputed `step`, so
+     `quantStep` can recompute it and Task 7's `epsilon > step` assertion is
+     checking the constants against each other rather than against a cached
+     number that could drift." That recomputation is exactly what claim (b)
+     below needs, and it means this test never hardcodes a single decimal
+     step or epsilon value copied from the prose table.
 
-  If Task 5 ships a different shape, **Step 2's run is where that surfaces**
-  (see below) — fix it by editing only the `CONTINUOUS_FIELDS` list and the
-  three interfaces at the top of this test file to match `quant.ts`'s real
-  exports. Do not touch any numeric assertion to make an import error go
-  away.
+  Task 5 owns `quant.ts` and must ship exactly this shape. **If Step 2's run
+  below shows otherwise, that is a Task 5 defect, not an ambiguity for this
+  test file to absorb** — do not edit `CONTINUOUS_FIELDS` or the interface
+  aliases here to match a nonconforming `quant.ts`; report it and stop
+  instead. (An earlier version of this brief instructed exactly that silent
+  absorption — see Step 2 below — which would launder a real contract
+  violation into a passing test rather than catching it. That instruction is
+  withdrawn.)
 
 - Produces: nothing exported. `CONTINUOUS_FIELDS` and `EXACT_FIELDS` below are
   test-local constants.
@@ -128,9 +132,10 @@ import type { EpsilonTable, QuantTable } from '../src/quant'
  * The six continuous ("band"-compared) fields from the locked contract §4.
  * Keyed to match WireKart's flat field names (§3) — in particular `t`, not
  * `lap.t`, because WireKart declares `t: number` as a sibling of `lap` and
- * `checkpointIdx`, not nested. See this file's task brief for the full
- * reasoning; if `Q`/`EPS` use different keys, edit this list and the two
- * `type` aliases below to match, and nothing else.
+ * `checkpointIdx`, not nested. This shape is contract §3, not a choice this
+ * file makes: if `Q`/`EPS` use different keys, that is a defect in
+ * quant.ts's Task 5, not a cue to edit this list to match it. See this
+ * file's task brief for the full reasoning.
  */
 const CONTINUOUS_FIELDS: (keyof QuantTable & keyof EpsilonTable)[] = [
   'position',
@@ -155,33 +160,58 @@ describe('epsilon strictly exceeds step, for every continuous field', () => {
   }
 })
 
+/**
+ * The mechanical check under test, factored out so it can be run against
+ * both the real tables and a deliberately mistuned copy. This is the same
+ * technique the first describe block above uses inline (`EPS[field] >
+ * quantStep(...)`); pulling it into a function is what lets "that invariant
+ * actually has teeth" below prove the check rejects a bad tuning, rather
+ * than merely restating `!(x > x)` against numbers nobody read from EPS/Q.
+ */
+function epsilonExceedsStep(
+  field: keyof QuantTable & keyof EpsilonTable,
+  eps: EpsilonTable,
+  q: QuantTable,
+): boolean {
+  const { min, max, bits } = q[field]
+  return eps[field] > quantStep(min, max, bits)
+}
+
 describe('that invariant actually has teeth', () => {
-  // The off-by-one-in-the-safe-direction check. This does NOT read the real
-  // EPS — it proves that the comparison technique above (`toBeGreaterThan`,
-  // i.e. strict `>`) is the thing doing the protecting. A `toBeGreaterThan`
-  // check is exactly what would go red if a field's epsilon were ever tuned
-  // down to equal its step: `x > x` is false for every x. This is the case
-  // this whole task exists to prevent — contract §0: "Do not tune an epsilon
-  // downward to make a test pass; that test is the one protecting the player
-  // from a buzzing kart."
-  it('an epsilon tuned exactly equal to its step fails the invariant', () => {
+  // Sanity: the extracted check agrees with the real EPS/Q for every field,
+  // before trusting it to catch a bad tuning below.
+  it('the real EPS/Q tables pass the mechanical check for every field', () => {
     for (const field of CONTINUOUS_FIELDS) {
-      const step = quantStep(Q[field].min, Q[field].max, Q[field].bits)
-      const badEpsilon = step // the forbidden tuning, stood in for directly
-      expect(badEpsilon).not.toBeGreaterThan(step)
+      expect(epsilonExceedsStep(field, EPS, Q)).toBe(true)
     }
   })
 
-  // And the mirror image: a `>=` comparison (the wrong tool) would let that
-  // exact tuning through. This does not exercise src code either — it is
-  // documentation-by-test of why the assertions above use `toBeGreaterThan`
-  // and not `toBeGreaterThanOrEqual`.
-  it('demonstrates why the check above must use > and not >=', () => {
+  // The actual control. Builds a copy of EPS with exactly one field's
+  // epsilon set equal to its own step -- the forbidden tuning contract §0
+  // names by name ("Do not tune an epsilon downward to make a test pass;
+  // that test is the one protecting the player from a buzzing kart") -- and
+  // asserts the mechanical check rejects it. This reads the real Q (for
+  // min/max/bits) and only perturbs EPS, so unlike a version that just
+  // restates `!(x > x)` against invented numbers, it genuinely fails if
+  // epsilonExceedsStep is ever loosened from `>` to `>=`.
+  it('an epsilon tuned exactly equal to its step fails the mechanical check, field by field', () => {
     for (const field of CONTINUOUS_FIELDS) {
       const step = quantStep(Q[field].min, Q[field].max, Q[field].bits)
-      const badEpsilon = step
-      expect(badEpsilon >= step).toBe(true) // a >= check would wrongly pass this
-      expect(badEpsilon > step).toBe(false) // the real check correctly rejects it
+      const badEps: EpsilonTable = { ...EPS, [field]: step }
+      expect(epsilonExceedsStep(field, badEps, Q)).toBe(false)
+    }
+  })
+
+  // The mirror image, against the same perturbed table rather than invented
+  // numbers: a `>=` comparison (the wrong tool) would wrongly accept the
+  // exact forbidden tuning `>` correctly rejects above.
+  it('demonstrates why the check must use > and not >=, against the same perturbed table', () => {
+    for (const field of CONTINUOUS_FIELDS) {
+      const step = quantStep(Q[field].min, Q[field].max, Q[field].bits)
+      const badEps: EpsilonTable = { ...EPS, [field]: step }
+      const recomputedStep = quantStep(Q[field].min, Q[field].max, Q[field].bits)
+      expect(badEps[field] >= recomputedStep).toBe(true) // the wrong tool wrongly passes this
+      expect(badEps[field] > recomputedStep).toBe(false) // the real check correctly rejects it
     }
   })
 })
@@ -286,12 +316,17 @@ things — read the message before acting:
 2. **`TypeError: Cannot read properties of undefined (reading 'min')`** (or
    `'bits'`, `'max'`, or a field name in the error stack) — this is a Vitest
    /esbuild runtime error, not a compile-time one (esbuild's SSR transform
-   does not check named exports statically), and it means the assumed
-   `QuantTable`/`EpsilonTable` shape in this file's header does not match
-   what `quant.ts` actually exports. Open `packages/protocol/src/quant.ts`,
-   read `Q`'s and `EPS`'s real property names, and edit only
-   `CONTINUOUS_FIELDS` and the two interface aliases at the top of this test
-   file to match. Do not change any `expect(...)` line.
+   does not check named exports statically), and it means `quant.ts` does not
+   export the six-key, `t`-keyed `QuantTable`/`EpsilonTable` shape contract
+   §3 locks. **This is a Task 5 defect, not an ambiguity for this file to
+   resolve.** Open `packages/protocol/src/quant.ts`, confirm which keys `Q`/
+   `EPS` actually carry, and fix `quant.ts` to match contract §3 — do not
+   edit `CONTINUOUS_FIELDS` or the interface aliases here to match a
+   nonconforming `quant.ts`, and do not change any `expect(...)` line. (An
+   earlier version of this step instructed exactly that: edit this file's
+   `CONTINUOUS_FIELDS`/interfaces to match whatever `quant.ts` happened to
+   export. That instruction would silently launder a real contract violation
+   into a passing test and is withdrawn.)
 3. **An `AssertionError` naming a specific field** (e.g. `EPS.driftCharge >
    quantStep(...)` fails, or a round-trip/endpoint test for `heading`
    exceeds its step) — this is a real defect in `quant.ts`'s `Q` or `EPS`
@@ -304,7 +339,7 @@ things — read the message before acting:
 Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
 
 Expected: zero type errors, every protocol test green (including this file's
-~30 test cases: 6 epsilon-invariant checks, 2 teeth-demonstration checks, 6
+~31 test cases: 6 epsilon-invariant checks, 3 teeth-demonstration checks, 6
 round-trip checks with 4 samples each, 6 endpoint checks, 9 exact-field
 checks with 3 samples each, plus the `-0` normalisation check).
 
@@ -321,12 +356,14 @@ asserted at each field's min, max, midpoint and an off-center sample;
 mechanically against Q and EPS's own values via quantStep, never
 against the contract's prose table.
 
-A dedicated 'teeth' check proves (b) isn't vacuous: it shows that an
-epsilon tuned exactly equal to its step - the forbidden tuning contract
-\$0 warns about - fails the same toBeGreaterThan comparison the real
-invariant test uses. Integer (Object.is-compared) fields are checked
-separately at their exact \$4 bit widths, including a -0-normalises-to-
-+0 case, independent of Q/EPS entirely.
+A dedicated 'teeth' block proves (b) isn't vacuous: it perturbs a copy
+of EPS, setting one field's epsilon equal to its own step - the
+forbidden tuning contract \$0 warns about - and shows the same
+mechanical epsilonExceedsStep check the real invariant test uses
+rejects it, plus a mirror case showing why the check must use strict >
+and not >=. Integer (Object.is-compared) fields are checked separately
+at their exact \$4 bit widths, including a -0-normalises-to-+0 case,
+independent of Q/EPS entirely.
 
 This task adds no production code - it is a regression suite over
 Tasks 4 and 5's already-frozen bits.ts/quant.ts. A failure here names a

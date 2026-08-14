@@ -7,57 +7,67 @@ Task 7's exhaustive epsilon-exceeds-step assertion, none of which are this task)
 `Q[field].{min,max,bits}` rather than repeating a magic number, so a single wrong
 constant here is wrong everywhere at once — which is exactly why every number below is
 derived from contract §4's own numbers (range, bits) rather than copied from its
-rounded prose "Step" column. This task has no dependency on Task 4's `bits.ts` and
-Task 4 has none on this task; they may be done in either order, but both must land
-before Task 6.
+prose "Step" column. This task has no dependency on Task 4's `bits.ts` and Task 4 has
+none on this task; they may be done in either order, but both must land before Task 6.
+(This independence is about the two modules' code, not the shared barrel file: Step
+12 below appends `export * from './quant'` to `packages/protocol/src/index.ts` and
+its "Before" anchor assumes Task 4 already appended `./bits` there, matching this
+plan's own convention of executing Tasks 1-18 in numeric order. If Task 5 is ever
+run before Task 4 in practice, adjust that one anchor to match whatever the barrel
+actually contains at the time — the append itself is order-independent, only the
+diff text shown is not.)
 
-**Read contract §4 before writing anything.** It is a 17-row table (`position`
+**Read contract §4 before writing anything.** It is a 20-row table (`position.{x,y,z}`
 through `playerId`) of `Field | Range | Bits | Step | Epsilon | Compared as`, plus two
 paragraphs of prose below it for the entity record and the header. This task's `Q`
-and `EPS` cover **only the 17-row table** — the per-kart record. The entity record's
-`entityId u16`/`kind u4`/`ownerId u3`/`ttl u16` and the header's `tick u32`/`eventSeq
-u32`/`entityCount u8` are plain fixed-width integers with no epsilon concept at all
-(`WireEntity` fields are never compared with an epsilon band — spec §5 states
-entities are "authority-simulated and client-interpolated only, never predicted", so
-there is nothing to reconcile against a locally-predicted value the way a kart's own
-fields are). Task 6 writes those bit widths as literal numbers, sourced directly from
-contract §4's prose, not through `Q`. Keeping `Q`/`EPS` scoped to exactly the table
-that has a Step/Epsilon/Compared-as column is what "transcribed from contract §4
-exactly" means here — widening it to fields that were never given an epsilon would be
-inventing a table contract §4 does not contain.
+and `EPS` cover **only the six continuous rows** — `position, velocity, heading,
+angularVelocity, driftCharge, t` — the only ones with a real step and epsilon.
+Contract §4 is explicit about the other fourteen: *"Only the six continuous rows
+above appear in `Q` and `EPS`. The [...] 'exact' rows carry no quantisation noise and
+therefore need no epsilon — giving them one would invite someone to compare an
+integer with a tolerance."* Those fourteen rows (`spinOutTicks`, `invulnTicks`,
+`boostTicks`, `respawnTicks`, `lap`, `checkpointIdx`, `item`, `surface`,
+`driftActive`+`driftDir`, `airborne`, `shielded`, `isBot`, `connected`, `playerId` —
+`isBot` and `connected` are two separate 1-bit rows, each with its own bit, not one
+shared bit) plus the entity record's `entityId u16`/`kind u4`/`ownerId u3`/`ttl u16`
+and the header's `tick u32`/`eventSeq u32`/`entityCount u8` are plain fixed-width
+integers or 1-bit flags with no epsilon concept at all. Task 6 writes all of those bit
+widths as literal numbers, sourced directly from contract §4's prose, not through `Q`
+— the same pattern Task 6 already uses for the entity/header fields (`ENTITY_ID_BITS =
+16`, etc.). Keeping `Q`/`EPS` scoped to exactly the six rows contract §4 gives a
+step/epsilon value is what "transcribed from contract §4 exactly" means here —
+widening it to fields that were never given an epsilon would be inventing a table
+contract §4 does not contain.
 
 **Two decisions this task makes, both load-bearing for Task 6 and for Task 7 (not
 this task, but the next reader of `Q`/`EPS`):**
 
-1. **19 keys, not 17 rows.** Contract §4's row `` `airborne`, `shielded`,
-   `isBot`/`connected` | — | 1 each `` packs three named things into one prose row.
-   Summing the table's own Bits column confirms this is *three* 1-bit fields, not
-   four: `position`(48) + `velocity`(36) + `heading`(12) + `angularVelocity`(10) +
-   `driftCharge`(8) + `lapT`(10) + `spinOutTicks`(8) + `invulnTicks`(8) +
-   `boostTicks`(7) + `respawnTicks`(7) + `lap`(3) + `checkpointIdx`(6) + `item`(4) +
-   `surface`(2) + `driftPacked`(2) + `airborne`(1) + `shielded`(1) +
-   `connected`(1) + `playerId`(3) = **177**, matching contract §4's stated total
-   exactly. Reading `isBot`/`connected` as *two* separate 1-bit fields sums to 178,
-   one over. So `isBot` and `connected` share a single wire bit — see decision 2 —
-   and `Q`/`EPS` name that shared bit `connected` (the network-observable ground
-   truth), not `isBot` (the derived flag). `driftActive`+`driftDir` is likewise one
-   named key here, `driftPacked`, because it is packed as one field on the wire even
-   though it fills two `KartState` fields; Task 6 owns the packing scheme, this task
-   only reserves its 2-bit width and 0 epsilon.
-2. **The prose "Step" column is illustrative, not the source of truth — `quantStep`
-   is.** Two of contract §4's own rows do not match the formula their own signature
-   specifies (`quantStep(min, max, bits) = (max - min) / ((1 << bits) - 1)`):
-   `angularVelocity`'s row says step `0.03125` (copied down from the `position`/
-   `velocity` rows above it), but `32 / ((1 << 10) - 1) = 32 / 1023 =
-   0.03128054741...`, not `0.03125`. `lap.t`'s row says step `0.0009766`, which is
-   `1 / 1024`; the formula gives `1 / ((1 << 10) - 1) = 1 / 1023 =
-   0.00097751710...`, an off-by-one in the denominator. This task's tests assert
-   `quantStep` against exact fraction expressions (`32 / 1023`, `1 / 1023`, ...) —
-   the same arithmetic the function itself performs — rather than against the
-   prose's rounded decimals, so a correct implementation is not penalized for
-   disagreeing with a table that rounds inconsistently. `Q`'s `min`/`max`/`bits`
-   integers (the only inputs `quantStep` and `writeFloatQ`/`readFloatQ` actually
-   consume) are unambiguous in contract §4 and are transcribed exactly.
+1. **Six keys, not twenty rows, and the continuous key is `t`.** Contract §3
+   (`QuantTable`/`EpsilonTable`) locks the interface to exactly `position, velocity,
+   heading, angularVelocity, driftCharge, t` — a closed shape, not an open
+   `Record<string, QuantField>` a later file could widen by accident. The key for lap
+   progress is `t`, not `lap.t` and not `lapT`, "matching the flat `WireKart`
+   interface" (contract §4) that Task 3 already ships. `isBot` and `connected` are
+   **not** in this table at all — contract §4 gives each its own dedicated wire bit
+   ("deliberately... An earlier draft implied they shared one, which only works if
+   `isBot === !connected` always holds... it is an *emergent* property... not an
+   invariant anything enforces") and both are exact (0-epsilon) fields Task 6 owns
+   directly, the same as the other twelve exact fields. Nothing in this file merges
+   any two `KartState` fields into one wire bit; packing decisions for exact fields
+   belong entirely to Task 6.
+2. **The prose "Step" column is illustrative; `quantStep` is the source of truth.**
+   Contract §4 states this itself: *"Steps below are `quantStep(min, max, bits) =
+   (max - min) / ((1 << bits) - 1)`, computed, not rounded. An earlier draft of this
+   table divided by `1 << bits` and was wrong in the fourth decimal for several rows
+   ... The code always derives the step through `quantStep`, so the arithmetic never
+   mattered to behaviour — but a reader who 'fixed' the formula to match the wrong
+   prose would break every one of them at once."* This task's tests assert `quantStep`
+   against exact fraction expressions (`32 / 1023`, `1 / 1023`, ...) — the same
+   arithmetic the function itself performs — rather than against any rounded decimal,
+   so a correct implementation cannot be made to disagree with itself no matter which
+   draft of the prose table a reader is looking at. `Q`'s `min`/`max`/`bits` integers
+   (the only inputs `quantStep` and `writeFloatQ`/`readFloatQ` actually consume) are
+   unambiguous in contract §4 and are transcribed exactly.
 
 **Files:**
 - Create: `packages/protocol/src/quant.ts`
@@ -65,10 +75,7 @@ this task, but the next reader of `Q`/`EPS`):**
 
 **Interfaces:**
 - Consumes: nothing. This file has zero imports (not even from `bits.ts`).
-- Produces (`packages/protocol/src/quant.ts`), contract §3's signature plus the types
-  it requires but does not itself name (`QuantTable`/`EpsilonTable` are referenced by
-  contract §3 as types but defined here, per the contract's own instruction that "a
-  task needing something absent must define it in its own files and say so"):
+- Produces (`packages/protocol/src/quant.ts`), contract §3's signature verbatim:
   ```ts
   export const WORLD_HALF = 1024
 
@@ -78,14 +85,23 @@ this task, but the next reader of `Q`/`EPS`):**
     readonly bits: number
   }
 
-  export type QuantFieldName =
-    | 'position' | 'velocity' | 'heading' | 'angularVelocity' | 'driftCharge' | 'lapT'
-    | 'spinOutTicks' | 'invulnTicks' | 'boostTicks' | 'respawnTicks'
-    | 'lap' | 'checkpointIdx' | 'item' | 'surface' | 'driftPacked'
-    | 'airborne' | 'shielded' | 'connected' | 'playerId'
+  export interface QuantTable {
+    readonly position: QuantField
+    readonly velocity: QuantField
+    readonly heading: QuantField
+    readonly angularVelocity: QuantField
+    readonly driftCharge: QuantField
+    readonly t: QuantField
+  }
 
-  export type QuantTable = Readonly<Record<QuantFieldName, QuantField>>
-  export type EpsilonTable = Readonly<Record<QuantFieldName, number>>
+  export interface EpsilonTable {
+    readonly position: number
+    readonly velocity: number
+    readonly heading: number
+    readonly angularVelocity: number
+    readonly driftCharge: number
+    readonly t: number
+  }
 
   export const Q: QuantTable
   export const EPS: EpsilonTable
@@ -121,17 +137,18 @@ describe('quantStep', () => {
     expect(quantStep(0, 1, 10)).toBe(1 / 1023)
   })
 
-  it('disagrees with contract §4 prose exactly where the prose rounds wrong', () => {
-    // angularVelocity's prose Step is "0.03125" (copied from position/velocity);
-    // the formula gives 32/1023, not 32/1024 - these differ at the 4th decimal
+  it('divides by 2^bits - 1, not 2^bits, at 10 bits', () => {
+    // An earlier draft of contract §4's prose table rounded two 10-bit rows as if
+    // the denominator were 2^bits (1024): angularVelocity would round to 0.03125
+    // and t (lap progress) to 0.0009766. The formula's denominator is 2^bits - 1
+    // (1023) - these differ at the 4th decimal, and the current contract's own
+    // Step column already reflects the corrected value (0.0312805 / 0.0009775).
     const angularVelocityStep = quantStep(-16, 16, 10)
     expect(angularVelocityStep).toBeCloseTo(0.0312805, 6)
     expect(angularVelocityStep).not.toBeCloseTo(0.03125, 6)
-    // lap.t's prose Step is "0.0009766", which is 1/1024; the formula's
-    // denominator is (2^bits - 1) = 1023, not 1024
-    const lapTStep = quantStep(0, 1, 10)
-    expect(lapTStep).toBeCloseTo(0.0009775, 6)
-    expect(lapTStep).not.toBeCloseTo(0.0009766, 6)
+    const tStep = quantStep(0, 1, 10)
+    expect(tStep).toBeCloseTo(0.0009775, 6)
+    expect(tStep).not.toBeCloseTo(0.0009766, 6)
   })
 
   it('is exactly 1 for every field whose range spans exactly 2^bits - 1 integers', () => {
@@ -167,10 +184,7 @@ export const WORLD_HALF = 1024
 /**
  * Uniform quantisation step size for a `bits`-wide field spanning [min, max].
  * `2^bits` distinct codes exist but only `2^bits - 1` *gaps* separate them, so the
- * step - and the denominator here - is `(2^bits - 1)`, not `2^bits`. Two rows of
- * contract §4's own prose table round as if it were `2^bits` (see this task's
- * decision 2); this function implements the formula the contract's own signature
- * specifies, not the rounded prose.
+ * step - and the denominator here - is `(2^bits - 1)`, not `2^bits` (contract §4).
  */
 export function quantStep(min: number, max: number, bits: number): number {
   return (max - min) / ((1 << bits) - 1)
@@ -190,97 +204,67 @@ Expected: PASS — 4 passed.
 Append to `packages/protocol/test/quant.test.ts`:
 
 ```ts
-import { EPS, Q, type QuantFieldName } from '../src/quant'
+import { EPS, Q } from '../src/quant'
 
-const ALL_FIELDS: QuantFieldName[] = [
-  'position', 'velocity', 'heading', 'angularVelocity', 'driftCharge', 'lapT',
-  'spinOutTicks', 'invulnTicks', 'boostTicks', 'respawnTicks',
-  'lap', 'checkpointIdx', 'item', 'surface', 'driftPacked',
-  'airborne', 'shielded', 'connected', 'playerId',
-]
+const CONTINUOUS_FIELDS = ['angularVelocity', 'driftCharge', 'heading', 'position', 't', 'velocity'] as const
 
 describe('Q', () => {
-  it('has exactly the 19 fields contract §4 names, position/velocity shared once', () => {
-    expect(Object.keys(Q).sort()).toEqual([...ALL_FIELDS].sort())
+  it('has exactly the six continuous fields contract §3/§4 name, keyed t not lapT', () => {
+    expect(Object.keys(Q).sort()).toEqual([...CONTINUOUS_FIELDS].sort())
   })
 
-  it('matches contract §4 range and bits for every continuous field', () => {
+  it('matches contract §4 range and bits for every field', () => {
     expect(Q.position).toEqual({ min: -WORLD_HALF, max: WORLD_HALF, bits: 16 })
     expect(Q.velocity).toEqual({ min: -64, max: 64, bits: 12 })
     expect(Q.heading).toEqual({ min: -Math.PI, max: Math.PI, bits: 12 })
     expect(Q.angularVelocity).toEqual({ min: -16, max: 16, bits: 10 })
     expect(Q.driftCharge).toEqual({ min: 0, max: 255, bits: 8 })
-    expect(Q.lapT).toEqual({ min: 0, max: 1, bits: 10 })
+    expect(Q.t).toEqual({ min: 0, max: 1, bits: 10 })
   })
 
-  it('matches contract §4 range and bits for every exact/enum field', () => {
-    expect(Q.spinOutTicks).toEqual({ min: 0, max: 255, bits: 8 })
-    expect(Q.invulnTicks).toEqual({ min: 0, max: 255, bits: 8 })
-    expect(Q.boostTicks).toEqual({ min: 0, max: 127, bits: 7 })
-    expect(Q.respawnTicks).toEqual({ min: 0, max: 127, bits: 7 })
-    expect(Q.lap).toEqual({ min: 0, max: 7, bits: 3 })
-    expect(Q.checkpointIdx).toEqual({ min: 0, max: 63, bits: 6 })
-    expect(Q.item).toEqual({ min: 0, max: 15, bits: 4 })
-    expect(Q.surface).toEqual({ min: 0, max: 3, bits: 2 })
-    expect(Q.driftPacked).toEqual({ min: 0, max: 3, bits: 2 })
-    expect(Q.airborne).toEqual({ min: 0, max: 1, bits: 1 })
-    expect(Q.shielded).toEqual({ min: 0, max: 1, bits: 1 })
-    expect(Q.connected).toEqual({ min: 0, max: 1, bits: 1 })
-    expect(Q.playerId).toEqual({ min: 0, max: 7, bits: 3 })
-  })
-
-  it('sums to 177 bits per kart when position/velocity are counted 3x each', () => {
-    const single = ALL_FIELDS.reduce((sum, f) => sum + Q[f].bits, 0)
-    // position and velocity are one Q entry each but three wire fields each (x,y,z)
-    const total = single + 2 * Q.position.bits + 2 * Q.velocity.bits
-    expect(total).toBe(177)
+  it('sums to 124 bits across the six continuous fields, position/velocity counted 3x each', () => {
+    // 3*16 (position.x,y,z) + 3*12 (velocity.x,y,z) + 12 (heading) + 10 (angularVelocity)
+    // + 8 (driftCharge) + 10 (t) = 48 + 36 + 12 + 10 + 8 + 10 = 124.
+    // The full 178-bit-per-kart total (contract §4) also needs the fourteen exact
+    // fields' widths, which are Task 6's local constants, not Q -- Task 6 asserts
+    // the full 178-bit total once those constants exist alongside these six.
+    const singleWidth = (['heading', 'angularVelocity', 'driftCharge', 't'] as const)
+      .reduce((sum, f) => sum + Q[f].bits, 0)
+    const total = singleWidth + 3 * Q.position.bits + 3 * Q.velocity.bits
+    expect(total).toBe(124)
   })
 
   it('is deeply frozen: the table and every field object inside it', () => {
     expect(Object.isFrozen(Q)).toBe(true)
     expect(Object.isFrozen(Q.position)).toBe(true)
-    expect(Object.isFrozen(Q.playerId)).toBe(true)
+    expect(Object.isFrozen(Q.t)).toBe(true)
   })
 })
 
 describe('EPS', () => {
-  it('has exactly the same 19 keys as Q', () => {
+  it('has exactly the same six keys as Q', () => {
     expect(Object.keys(EPS).sort()).toEqual(Object.keys(Q).sort())
   })
 
-  it('matches contract §4 epsilon for every continuous (band-compared) field', () => {
+  it('matches contract §4 epsilon for every field', () => {
     expect(EPS.position).toBe(0.05)
     expect(EPS.velocity).toBe(0.05)
     expect(EPS.heading).toBe(0.0025)
     expect(EPS.angularVelocity).toBe(0.05)
     expect(EPS.driftCharge).toBe(1.5)
-    expect(EPS.lapT).toBe(0.002)
-  })
-
-  it('is exactly 0 for every exact (Object.is-compared) field', () => {
-    const exactFields: QuantFieldName[] = [
-      'spinOutTicks', 'invulnTicks', 'boostTicks', 'respawnTicks',
-      'lap', 'checkpointIdx', 'item', 'surface', 'driftPacked',
-      'airborne', 'shielded', 'connected', 'playerId',
-    ]
-    for (const f of exactFields) {
-      expect(EPS[f]).toBe(0)
-    }
+    expect(EPS.t).toBe(0.002)
   })
 
   it('is frozen', () => {
     expect(Object.isFrozen(EPS)).toBe(true)
   })
 
-  it('exceeds quantStep for every continuous field - the buzz-prevention invariant', () => {
+  it('exceeds quantStep for every field - the buzz-prevention invariant', () => {
     // contract §0/§4: an epsilon at or below its field's step means quantisation
     // noise alone triggers a correction every snapshot. This is a basic sanity
     // check at the point of authorship; Task 7 asserts the same inequality
     // mechanically for every field as its own dedicated test.
-    const continuousFields: QuantFieldName[] = [
-      'position', 'velocity', 'heading', 'angularVelocity', 'driftCharge', 'lapT',
-    ]
-    for (const f of continuousFields) {
+    for (const f of CONTINUOUS_FIELDS) {
       const step = quantStep(Q[f].min, Q[f].max, Q[f].bits)
       expect(EPS[f]).toBeGreaterThan(step)
     }
@@ -311,29 +295,37 @@ export interface QuantField {
 }
 
 /**
- * The 19 named fields of contract §4's per-kart table. `position` and `velocity`
- * are listed once each and reused for x, y and z by whoever encodes them (Task 6).
- * `driftPacked` is the 2-bit combination of KartState's `drift.active` and
- * `drift.dir` (Task 6 owns the packing scheme; this only reserves its width and
- * epsilon). `connected` is the single wire bit contract §4's row `airborne`,
- * `shielded`, `isBot`/`connected` shares between KartState's `isBot` and
- * `connected` fields (decision 1 above) - `isBot` has no Q/EPS entry of its own
- * because it never has its own wire bit.
+ * The six continuous fields of contract §4's per-kart table - the only ones with a
+ * real step and epsilon. `position` and `velocity` are listed once each and reused
+ * for x, y and z by whoever encodes them (Task 6). The fourteen exact/enum fields
+ * (spinOutTicks .. playerId, isBot and connected each with their own bit) have no
+ * entry here: they carry no quantisation noise, so an epsilon for them would invite
+ * comparing an integer with a tolerance (contract §4). Task 6 owns their bit widths
+ * directly, as local constants.
  */
-export type QuantFieldName =
-  | 'position' | 'velocity' | 'heading' | 'angularVelocity' | 'driftCharge' | 'lapT'
-  | 'spinOutTicks' | 'invulnTicks' | 'boostTicks' | 'respawnTicks'
-  | 'lap' | 'checkpointIdx' | 'item' | 'surface' | 'driftPacked'
-  | 'airborne' | 'shielded' | 'connected' | 'playerId'
+export interface QuantTable {
+  readonly position: QuantField
+  readonly velocity: QuantField
+  readonly heading: QuantField
+  readonly angularVelocity: QuantField
+  readonly driftCharge: QuantField
+  readonly t: QuantField
+}
 
-export type QuantTable = Readonly<Record<QuantFieldName, QuantField>>
-export type EpsilonTable = Readonly<Record<QuantFieldName, number>>
+export interface EpsilonTable {
+  readonly position: number
+  readonly velocity: number
+  readonly heading: number
+  readonly angularVelocity: number
+  readonly driftCharge: number
+  readonly t: number
+}
 
 function qf(min: number, max: number, bits: number): QuantField {
   return Object.freeze({ min, max, bits })
 }
 
-/** Contract §4's per-kart table, transcribed field by field. Frozen two levels
+/** Contract §4's six continuous rows, transcribed field by field. Frozen two levels
  * deep: the table itself and every QuantField inside it. */
 export const Q: QuantTable = Object.freeze({
   position: qf(-WORLD_HALF, WORLD_HALF, 16),
@@ -341,46 +333,19 @@ export const Q: QuantTable = Object.freeze({
   heading: qf(-Math.PI, Math.PI, 12),
   angularVelocity: qf(-16, 16, 10),
   driftCharge: qf(0, 255, 8),
-  lapT: qf(0, 1, 10),
-  spinOutTicks: qf(0, 255, 8),
-  invulnTicks: qf(0, 255, 8),
-  boostTicks: qf(0, 127, 7),
-  respawnTicks: qf(0, 127, 7),
-  lap: qf(0, 7, 3),
-  checkpointIdx: qf(0, 63, 6),
-  item: qf(0, 15, 4),
-  surface: qf(0, 3, 2),
-  driftPacked: qf(0, 3, 2),
-  airborne: qf(0, 1, 1),
-  shielded: qf(0, 1, 1),
-  connected: qf(0, 1, 1),
-  playerId: qf(0, 7, 3),
+  t: qf(0, 1, 10),
 })
 
-/** Contract §4's Epsilon column. 0 for every exact/enum field (Object.is-compared,
- * never banded); every continuous field's epsilon exceeds its own quantStep - see
- * the last test in this task's file, and Task 7's exhaustive version of the same
- * check. Do not tune any of these down (contract §0). */
+/** Contract §4's Epsilon column for the six continuous rows. Every value here
+ * exceeds its own quantStep - see the last test in this task's file, and Task 7's
+ * exhaustive version of the same check. Do not tune any of these down (contract §0). */
 export const EPS: EpsilonTable = Object.freeze({
   position: 0.05,
   velocity: 0.05,
   heading: 0.0025,
   angularVelocity: 0.05,
   driftCharge: 1.5,
-  lapT: 0.002,
-  spinOutTicks: 0,
-  invulnTicks: 0,
-  boostTicks: 0,
-  respawnTicks: 0,
-  lap: 0,
-  checkpointIdx: 0,
-  item: 0,
-  surface: 0,
-  driftPacked: 0,
-  airborne: 0,
-  shielded: 0,
-  connected: 0,
-  playerId: 0,
+  t: 0.002,
 })
 ```
 
@@ -388,8 +353,7 @@ export const EPS: EpsilonTable = Object.freeze({
 
 Run: `npx vitest run packages/protocol/test/quant.test.ts`
 
-Expected: PASS — 13 passed (4 from `quantStep`/`WORLD_HALF`, 5 from `Q`, 4 from
-`EPS`).
+Expected: PASS — 12 passed (4 from `quantStep`/`WORLD_HALF`, 4 from `Q`, 4 from `EPS`).
 
 ---
 
@@ -397,12 +361,88 @@ Expected: PASS — 13 passed (4 from `quantStep`/`WORLD_HALF`, 5 from `Q`, 4 fro
 
 Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
 
-Expected: PASS — no TypeScript errors; `quant.test.ts` 13 passed, plus Task 3's and
+Expected: PASS — no TypeScript errors; `quant.test.ts` 12 passed, plus Task 3's and
 Task 4's tests (this task adds no new dependency on either and removes nothing).
 
-- [ ] **Step 10: Commit**
+---
+
+- [ ] **Step 10: Write the failing test — `Q`, `EPS`, `quantStep`, `WORLD_HALF` reachable through the barrel**
+
+Contract §3: "The barrel exists from Task 3, not Task 18" — by the time this task
+runs, `packages/protocol/src/index.ts` re-exports `./types` (Task 3) and `./bits`
+(Task 4). This task's module is `quant.ts`; appending its own line is this task's
+last implementation step, exactly as Plan 1's Tasks 3-10 each did for
+`@tapkart/sim/src/index.ts`, so `packages/net` can `import ... from
+'@tapkart/protocol'` from Task 11 onward without waiting for Task 18.
+
+Append to `packages/protocol/test/quant.test.ts`, after the closing `})` of
+`describe('EPS', ...)`:
+
+```ts
+describe('@tapkart/protocol barrel', () => {
+  it('re-exports Q, EPS, quantStep and WORLD_HALF', async () => {
+    const pkg = await import('@tapkart/protocol')
+    expect(pkg.WORLD_HALF).toBe(1024)
+    expect(typeof pkg.quantStep).toBe('function')
+    expect(pkg.Q.position.bits).toBe(16)
+    expect(pkg.EPS.position).toBe(0.05)
+  })
+})
+```
+
+This is a dynamic import, matching Task 3's own barrel test in `types.test.ts` and
+`packages/sim/test/barrel.test.ts`'s `'resolves through the @tapkart/sim package entry
+point'` test, so a resolution failure fails this one test rather than the whole file.
+
+- [ ] **Step 11: Run the test to verify it fails**
+
+Run: `npx vitest run packages/protocol/test/quant.test.ts -t "re-exports Q, EPS, quantStep and WORLD_HALF"`
+
+Expected: FAIL — `packages/protocol/src/index.ts` does not yet re-export `./quant`
+(only `./types` and `./bits`), so the dynamically-imported package object has no
+`WORLD_HALF` property: `AssertionError: expected undefined to be 1024` at
+`expect(pkg.WORLD_HALF).toBe(1024)`.
+
+- [ ] **Step 12: Widen the barrel**
+
+In `packages/protocol/src/index.ts`. Before:
+
+```ts
+export * from './types'
+export * from './bits'
+```
+
+After:
+
+```ts
+export * from './types'
+export * from './bits'
+export * from './quant'
+```
+
+- [ ] **Step 13: Run the test to verify it passes, then the whole file and package**
+
+Run: `npx vitest run packages/protocol/test/quant.test.ts`
+Expected: PASS — 13 passed (12 from Steps 4/8, plus the barrel test).
+
+Run: `npx tsc --noEmit -p packages/protocol && npx vitest run packages/protocol`
+Expected: PASS — no TypeScript errors; every test across the package still passes,
+including Task 3's and Task 4's own barrel tests, which this task's edit to
+`index.ts` does not touch.
+
+- [ ] **Step 14: Commit**
 
 ```bash
-git add packages/protocol/src/quant.ts packages/protocol/test/quant.test.ts
-git commit -m "feat(protocol): quantisation and epsilon tables transcribed from contract §4"
+git add packages/protocol/src/quant.ts packages/protocol/src/index.ts \
+        packages/protocol/test/quant.test.ts
+git commit -m "feat(protocol): quantisation and epsilon tables transcribed from contract §4
+
+Q/EPS cover exactly the six continuous fields (position, velocity, heading,
+angularVelocity, driftCharge, t) contract §3 locks -- the fourteen exact/enum
+fields (isBot and connected each with their own bit, not shared) carry no
+epsilon and are Task 6's local constants instead.
+
+Widens packages/protocol/src/index.ts to re-export quant.ts, so packages/net
+can reach Q/EPS/quantStep/WORLD_HALF through @tapkart/protocol from Task 11
+onward instead of waiting for Task 18's barrel widening."
 ```

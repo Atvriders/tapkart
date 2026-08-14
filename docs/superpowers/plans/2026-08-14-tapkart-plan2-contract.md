@@ -133,8 +133,8 @@ export function despawnEntityAt(ctx: SimContext, state: SimState, idx: number, e
 
 ```ts
 // packages/sim/src/recovery.ts
-export function startSpinOut(ctx: SimContext, k: KartState, ticks: number,
-                             state: SimState, events: AuthEvent[]): void      // CHANGED: ctx prepended
+export function startSpinOut(ctx: SimContext, state: SimState, k: KartState,
+                             ticks: number, events: AuthEvent[]): void        // CHANGED: ctx prepended, nothing else moved
 ```
 
 `updateEntities`, `updateItemBoxes`, `useItem` and `updatePhase` already take
@@ -359,9 +359,12 @@ is continuously bit-packed — `BitWriter`/`BitReader` expose no `align()` and n
 is wanted. A record does not start on a byte boundary, and encoders must not
 assume it does.
 
-**Only the six continuous rows above appear in `Q` and `EPS`.** The eleven "exact"
-rows carry no quantisation noise and therefore need no epsilon — giving them one
-would invite someone to compare an integer with a tolerance. They are compared
+**Only the six continuous rows above appear in `Q` and `EPS`.** Every other row is
+"exact": it carries no quantisation noise and therefore needs no epsilon — giving
+one would invite someone to compare an integer with a tolerance. (An earlier draft
+said "the eleven exact rows"; the count changed when `isBot` and `connected` were
+split, so the number is deliberately not restated here — the rule is "not one of
+the six above", not a tally that drifts.) They are compared
 with `Object.is`, and `-0` is normalised to `+0` first. `QuantTable` deliberately
 exposes raw `{min, max, bits}` rather than a precomputed `step`, so `quantStep`
 can recompute it and Task 7's `epsilon > step` assertion is checking the
@@ -430,6 +433,39 @@ export class ShadowLoop { constructor(ctx: SimContext, state: SimState, t: Trans
 
 // packages/net/src/index.ts                                   [Task 18]
 ```
+
+### Which transports Plan 2 actually builds — resolved
+
+Spec §3 lists three `Transport` implementations: `WebRTCTransport`,
+`WebSocketTransport`, `LoopbackTransport`. **Plan 2 builds the interface and
+Loopback only.** WebRTC and WebSocket land in **Plan 4**, alongside the signalling
+endpoint, the room registry and the server that terminates them — they are
+meaningless without a peer to connect to, and Plan 2 is specifically the part that
+must be verifiable with no network at all.
+
+This is not a gap in coverage; it is where the seam falls. Spec §8's netcode tests
+are all written against `LoopbackTransport` precisely so convergence, the
+zero-corrections invariant and promotion can be proven deterministically, in
+process, with injected latency, jitter and loss. Nothing above the transport knows
+which implementation it is speaking to, so Plan 4 adds two implementations and
+changes no loop.
+
+### The client sends input to both host and shadow — how, with one `Transport`
+
+Spec §5: *"Every client sends its input to **both** the host and the server
+shadow. That is 2 KB/s up per client, and it is what makes promotion
+near-instant."* `ClientLoop` takes a single `Transport`, which looks like a
+contradiction and is not.
+
+`Transport.broadcast(channel, data)` sends to **every peer** the transport holds.
+A client's transport holds two: the host and the shadow. So the dual-send is
+`broadcast('unreliable', inputDatagram)` — one call, two recipients, and the loop
+never needs to know which peer is which. `send(channel, peerId, data)` remains for
+the cases that genuinely target one peer.
+
+This is also why promotion needs no reconnection at the `ClientLoop` level: the
+shadow was already a peer receiving every input, so promotion changes which peer
+the client *listens* to, not who it talks to.
 
 **Loopback determinism:** `LoopbackOptions.seed` exists because jitter and loss
 must be reproducible. `makeLoopbackPair` draws from `rngAt(seed, cursor)` with

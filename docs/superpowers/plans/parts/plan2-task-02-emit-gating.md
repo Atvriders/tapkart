@@ -20,10 +20,10 @@
   - `packages/sim/test/fixtures/track-fixtures.ts` — `makeContext(track, isLeader = true)`, already follower-capable, used unchanged by the one new step-level test in this task.
 
 - Produces (exact shapes later tasks and `net`/`server` rely on):
-  - `export function startSpinOut(ctx: SimContext, state: SimState, k: KartState, ticks: number, events: AuthEvent[]): void` — **signature changed**, `ctx` prepended. This is the deviation from contract §2a's literal text, justified above.
+  - `export function startSpinOut(ctx: SimContext, state: SimState, k: KartState, ticks: number, events: AuthEvent[]): void` — **signature changed**: `ctx` prepended, nothing else moved. Matches contract §2a exactly.
   - `export function spawnEntity(ctx: SimContext, state: SimState, kind: EntityKind, ownerId: number, position: Vec3, heading: number, targetId: number, ttl: number, events: AuthEvent[]): number` — matches contract §2a exactly.
   - `export function despawnEntityAt(ctx: SimContext, state: SimState, idx: number, events: AuthEvent[]): void` — matches contract §2a exactly.
-  - Every one of the eight sites this task touches now reads `if (ctx.isLeader) emit(...)` (or, for `startSpinOut`/`beginRespawn`, an equivalent single-line guard) instead of an unconditional `emit(...)`. A follower's simulation is unchanged: the state mutation that accompanies each event (spin-out timer, respawn timer/position, lap/checkpoint/finish bookkeeping, entity pool contents, `shielded` flag) happens exactly as before; only the `emit()` call is skipped.
+  - Every one of the eight sites this task touches now reads `if (ctx.isLeader) emit(...)` (or, for `startSpinOut`/`beginRespawn`, the identical single-line guard) instead of an unconditional `emit(...)`. A follower's simulation is unchanged: the state mutation that accompanies each event (spin-out timer, respawn timer/position, lap/checkpoint/finish bookkeeping, entity pool contents, `shielded` flag) happens exactly as before; only the `emit()` call is skipped.
 
 ---
 
@@ -851,7 +851,7 @@ After:
 Run: `npx tsc --noEmit -p packages/sim`
 Expected: FAIL. `packages/sim/test/entity.test.ts` calls `spawnEntity`/`despawnEntityAt` with the old shape at every one of its call sites — 41 calls of the form `spawnEntity(state, ...)`, one of the form `spawnEntity(prev, ...)`, and 6 of the form `despawnEntityAt(state, ...)` (48 total; verified by `grep -c` against the file before this task touched it). tsc reports one `TS2554: Expected 9 arguments, but got 8` (or `TS2345`, depending on which parameter position mismatches first) per call site. Step 19 fixes all 48 in one pass.
 
-- [ ] **Step 19: Give the seven call sites that lack a `ctx` in scope one, then thread `ctx` through every call site in the file**
+- [ ] **Step 19: Give the nine call sites that lack a `ctx` in scope one, then thread `ctx` through every call site in the file**
 
 In `packages/sim/test/entity.test.ts`, widen `stubContext`. Before:
 
@@ -879,7 +879,7 @@ After:
 }
 ```
 
-Seven `it` blocks call `spawnEntity`/`despawnEntityAt` without ever having built a `ctx` (verified: grepped `stubContext()` against every line range that calls `spawnEntity`/`despawnEntityAt` in this file — `describe('spawnEntity', ...)`'s two tests, `describe('despawnEntityAt', ...)`'s two tests, and three of `describe('surgeActiveOn', ...)`'s tests have none). Give each a `const ctx = stubContext()` as its first statement.
+Nine `it` blocks call `spawnEntity`/`despawnEntityAt` without ever having built a `ctx` (verified: grepped `stubContext()` against every line range that calls `spawnEntity`/`despawnEntityAt` in this file — `describe('spawnEntity', ...)`'s two tests, `describe('despawnEntityAt', ...)`'s two tests, three of `describe('surgeActiveOn', ...)`'s tests, and two of `describe('updateEntities collision', ...)`'s tests — `'takes the shield down when a bubble is despawned directly'` and `'does not touch shields when a non-bubble entity despawns'`, both of which call `spawnEntity`/`despawnEntityAt` directly rather than through `updateEntities` and so never had a `ctx` in scope either). Give each a `const ctx = stubContext()` as its first statement.
 
 Edit 1. Before:
 
@@ -986,7 +986,41 @@ After:
     const state = progressState()
 ```
 
-Now every `spawnEntity`/`despawnEntityAt` call site in the file has `ctx` reachable in its enclosing `it` block — either just added above, or already present from an existing `const ctx = stubContext()` (verified: `grep -n "stubContext()" packages/sim/test/entity.test.ts` lists one per `it` block that calls `updateEntities`/`spawnEntity`/`despawnEntityAt`, covering the whole file once the seven above are added). Run this single command to thread `ctx` into all 48 call sites mechanically:
+Edit 8. Before:
+
+```ts
+  it('takes the shield down when a bubble is despawned directly', () => {
+    // Covering the call rather than the caller: every despawn path runs through
+    // despawnEntityAt, which is why the clear lives there.
+    const state = blankState()
+```
+
+After:
+
+```ts
+  it('takes the shield down when a bubble is despawned directly', () => {
+    // Covering the call rather than the caller: every despawn path runs through
+    // despawnEntityAt, which is why the clear lives there.
+    const ctx = stubContext()
+    const state = blankState()
+```
+
+Edit 9. Before:
+
+```ts
+  it('does not touch shields when a non-bubble entity despawns', () => {
+    const state = blankState()
+```
+
+After:
+
+```ts
+  it('does not touch shields when a non-bubble entity despawns', () => {
+    const ctx = stubContext()
+    const state = blankState()
+```
+
+Now every `spawnEntity`/`despawnEntityAt` call site in the file has `ctx` reachable in its enclosing `it` block — either just added above, or already present from an existing `const ctx = stubContext()` (verified: `grep -n "stubContext()" packages/sim/test/entity.test.ts` lists one per `it` block that calls `updateEntities`/`spawnEntity`/`despawnEntityAt`, covering the whole file once the nine above are added). Run this single command to thread `ctx` into all 48 call sites mechanically:
 
 ```bash
 sed -i -E 's/\bspawnEntity\((state|prev),/spawnEntity(ctx, \1,/g; s/\bdespawnEntityAt\(state,/despawnEntityAt(ctx, state,/g' packages/sim/test/entity.test.ts

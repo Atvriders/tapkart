@@ -17,22 +17,25 @@ a smoke test:
    within bounds; no lap counter regresses; no entity disappears; no event is applied twice.
 3. A late-join test exercising `AuthorityCheckpoint`.
 
-**A hazard this task takes seriously.** `ClientLoop`'s locked signature
-(`constructor(ctx, playerId, t)`, `tick(localIntent)`, `corrections(): number`) exposes **no way to
-read its predicted `SimState` from outside** — no getter, no third constructor argument for a
-caller-owned `state` the way `AuthorityLoop`/`ShadowLoop` take one. This is real: it means "assert
-the client's own kart position is within epsilon of the authoritative one" cannot be written as
-`expect(client.state.karts[0].position.x)…` — there is no `client.state`. Test 1 below resolves this
-by proving `corrections()` *is* the numeric bound, not a weaker proxy for it, and says so before
-using it. `AuthorityLoop`'s file (Task 14) also does not exist yet at the time this task is written,
-and its constructor takes no input parameter at all (`tick(): void`), which means it must read every
-kart's input off its own `Transport`, the same way `ShadowLoop` does — a real but unverifiable
-assumption, stated here rather than guessed silently. Tests 2 and 3 below sidestep needing
-`AuthorityLoop` at all: they drive a **minimal, spec-faithful host loop written directly in the test
-file**, using only `step()` (already shipped, verified by reading `packages/sim/src/step.ts`) and
-`protocol`'s locked encoders — so their correctness never depends on code nobody has written yet.
-This keeps this task's tests true regardless of how Task 14 turns out, and is flagged in the final
-report as something Task 14's own tests must cover separately.
+**These tests assert on real state, through the locked accessors.** Contract §5 gives
+`AuthorityLoop` and `ClientLoop` a `state(): SimState` each, annotated in the contract itself with
+why they exist: *"read-only view, so the promotion test can compare authorities"* and *"read-only
+view; the convergence test asserts on it directly."* An earlier draft of this brief was written
+against a three-member `ClientLoop` and a two-member `AuthorityLoop`, and every workaround it grew
+is deleted here: Test 1 no longer argues that `corrections()` is an acceptable proxy for a state
+comparison — it does both — and Test 2 no longer hand-rolls a `makeFakeHost()` out of `step()` and
+raw encoders. Test 2 drives a **real `AuthorityLoop`** against a **real `ShadowLoop`**, which is the
+only version of that test that can fail when `AuthorityLoop` is broken.
+
+**The one topology compromise, stated rather than hidden.** Spec §5 has every client sending its
+input to *both* the host and the server shadow. `makeLoopbackPair` (Task 12) is a **pair**: a
+message broadcast on side `a` is delivered to side `b` and vice versa, so three parties cannot share
+one bus. Test 2 therefore places the host on `a`, the shadow on `b`, and has the test itself
+broadcast the same scripted input datagram on **both** sides at 30 Hz — side `b` so the host
+receives it, side `a` so the shadow does. That is the dual-send spec §5 describes, minus a real
+third peer. A genuine three-party transport is not in this plan's module map (contract §5 lists
+`transport.ts` and `loopback.ts` and nothing else), so this is a knowing limitation, not an
+oversight, and it is repeated in the flagged-ambiguities list at the bottom of this brief.
 
 **Interfaces:**
 
@@ -49,33 +52,48 @@ export function makeIntentBuffer(): Intent[]
 // packages/net/src/shadow.ts                                  [Task 16, this plan]
 export const HOST_TIMEOUT_TICKS = 90
 export const SNAPSHOT_PERIOD_TICKS = 3
-export const WIRE_TAG_INPUT = 4
-export const WIRE_TAG_SNAPSHOT = 5
-export const WIRE_TAG_EVENTS = 6
-export const WIRE_TAG_CHECKPOINT = 7
-export const WIRE_TAG_AUTHORITY_CHANGE = 8
 export function decodeAuthorityChange(buf: Uint8Array): { tick: number; eventSeq: number }
 export class ShadowLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(): void; promote(tick: number): void }
 
 // packages/net/src/transport.ts                               [Task 11]
 export interface Transport { send(...): void; broadcast(...): void; onMessage(...): void; onPeerLost(...): void; peers(): string[]; close(): void }
 
+// packages/net/src/authority.ts                               [Task 14]
+export class AuthorityLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(): void; state(): SimState }
+
 // packages/net/src/client.ts                                  [Task 15]
-export class ClientLoop { constructor(ctx: SimContext, playerId: number, t: Transport); tick(localIntent: Intent): void; corrections(): number }
+export class ClientLoop { constructor(ctx: SimContext, playerId: number, t: Transport); tick(localIntent: Intent): void; corrections(): number; state(): SimState }
 
 // packages/net/test/fixtures/net-fixtures.ts                  [Task 12]
 export function makeNetContext(isLeader?: boolean): SimContext
 export function makeLossyPair(overrides?: Partial<LoopbackOptions>): { a: Transport; b: Transport; pump(nowMs: number): void }
 // Default LoopbackOptions: { latencyMs: 150, jitterMs: 50, lossRate: 0.05, seed: 0xC0FFEE }
 
-// ../../protocol/src/* — relative, not `@tapkart/protocol`: see Task 16's Interfaces block for why.
-export function encodeSnapshot(out: Uint8Array, state: SimState, lastProcessedInputTick: number[]): number
-export function encodeEvents(out: Uint8Array, events: AuthEvent[]): number
+// @tapkart/protocol — the bare specifier, never a relative path into
+// ../../protocol/src/*. Contract §3: the barrel exists from Task 3, and
+// "net imports @tapkart/protocol, always."
+export type ChannelName = 'unreliable' | 'reliable'
+export type MessageKind = 'hello' | 'welcome' | 'lobby' | 'start' | 'input' | 'snapshot'
+                        | 'events' | 'checkpoint' | 'authorityChange' | 'ping' | 'pong'
+export const WIRE_TAG: { readonly [K in MessageKind]: number }
+export function encodeHeader(out: Uint8Array, kind: MessageKind): number  // 2 bytes, returns 2
+export function decodeHeader(buf: Uint8Array): WireHeader                 // throws on unknown tag
+export const EPS: EpsilonTable            // six keys: position, velocity, heading,
+                                          // angularVelocity, driftCharge, t
 export function encodeInput(out: Uint8Array, playerId: number, intents: Intent[]): number
 export const INPUT_REDUNDANCY = 8
 export function encodeCheckpoint(out: Uint8Array, state: SimState): number
 export function decodeCheckpoint(buf: Uint8Array, dst: SimState): void
 ```
+
+Buffer sizes used below, derived rather than copied:
+
+- **Snapshot: 1024 B.** Contract §4's worst case is `8 × 178` kart bits `+ 32 × 135` entity bits
+  `+ 200` header bits `= 5944 bits = 743 B`, plus the 2-byte message header. `BitWriter` overflows
+  *silently* (a typed-array write past the end is a no-op), so this figure is computed, not guessed.
+- **Checkpoint: 8192 B.** Task 8 asserts `encodeCheckpoint` returns **5384** for this `SimState`
+  shape. `DataView.setFloat64` past the end throws `RangeError`, so an undersized buffer here fails
+  loudly — an earlier draft of this brief used 4096 and would have thrown on the first call.
 
 Produces:
 
@@ -112,14 +130,20 @@ Create `packages/net/test/fixtures/scripted-input.ts`:
 // Deterministic per-tick input for kart 0, shared by every integration test in this plan so a
 // reference run and a networked run always agree bit-for-bit on "what the player did."
 import type { Intent } from '@tapkart/sim'
-import type { ChannelName } from '../../../protocol/src/types'
-import { INPUT_REDUNDANCY, encodeInput } from '../../../protocol/src/input'
-import { WIRE_TAG_INPUT } from '../../src/shadow'
+import type { ChannelName } from '@tapkart/protocol'
+import { INPUT_REDUNDANCY, encodeHeader, encodeInput } from '@tapkart/protocol'
 
 /**
  * Smooth low-frequency sine steer, constant half-throttle, a brief periodic drift tap. No
  * `Math.random()` anywhere: two independent callers computing `scriptedIntent(tick, playerId)` for
  * the same arguments always agree, which is what makes a same-process reference run meaningful.
+ *
+ * NOT used by the convergence test. A varying steer signal puts the authority's latency-held copy
+ * behind the client's current value by ~one one-way trip, which is a real physics difference and
+ * not quantization noise - Task 15 measured exactly that and settled on a held-steady intent for
+ * the zero-corrections invariant. This function is for the promotion and late-join tests, where
+ * what matters is that two peers agree on a non-trivial trajectory, not that the trajectory is
+ * noise-free.
  */
 export function scriptedIntent(tick: number, playerId: number): Intent {
   const phase = tick / 97 + playerId
@@ -135,10 +159,14 @@ export function scriptedIntent(tick: number, playerId: number): Intent {
 
 /**
  * Encodes the redundant window ending at `tick` (spec S5: "each datagram carrying the last 8
- * intents") as one WIRE_TAG_INPUT-tagged message and broadcasts it. Before `tick >=
+ * intents") behind the contract's shared 2-byte header and broadcasts it. Before `tick >=
  * INPUT_REDUNDANCY - 1`, the window is padded by repeating the earliest available intent, which is
  * harmless: every entry in the padded region is identical to what `scriptedIntent` would compute
  * for that tick anyway.
+ *
+ * The header is `encodeHeader(buf, 'input')` - protocol's, shared with AuthorityLoop, ClientLoop
+ * and ShadowLoop. An earlier draft of this fixture wrote a private tag byte imported from
+ * `../../src/shadow`, which no other loop in the plan wrote or read.
  */
 export function broadcastScriptedInput(
   t: { broadcast(channel: ChannelName, data: Uint8Array): void },
@@ -149,10 +177,10 @@ export function broadcastScriptedInput(
   const first = Math.max(0, tick - INPUT_REDUNDANCY + 1)
   for (let ti = first; ti <= tick; ti++) intents.push(scriptedIntent(ti, playerId))
   while (intents.length < INPUT_REDUNDANCY) intents.unshift(scriptedIntent(first, playerId))
-  const buf = new Uint8Array(1 + 128)
-  buf[0] = WIRE_TAG_INPUT
-  const n = encodeInput(buf.subarray(1), playerId, intents)
-  t.broadcast('unreliable', buf.subarray(0, n + 1))
+  const buf = new Uint8Array(256)
+  const h = encodeHeader(buf, 'input')
+  const n = encodeInput(buf.subarray(h), playerId, intents)
+  t.broadcast('unreliable', buf.slice(0, h + n))
 }
 ```
 
@@ -160,7 +188,7 @@ export function broadcastScriptedInput(
 
 Run: `npx tsc --noEmit -p packages/net`
 Expected: PASS. (No test imports it yet; this only proves the file itself type-checks against
-`INPUT_REDUNDANCY`/`encodeInput`/`WIRE_TAG_INPUT`'s real shapes.)
+`INPUT_REDUNDANCY`/`encodeInput`/`encodeHeader`'s real shapes.)
 
 #### Fixture 2: transport spy
 
@@ -175,7 +203,11 @@ Create `packages/net/test/fixtures/spy-transport.ts`:
 // `onMessage` on the returned Transport is what the code under test registers against, so exactly
 // one real listener is ever attached to `inner`, regardless of how many times this wrapper's own
 // onMessage is (re)called.
-import type { ChannelName, Transport } from '../../src/transport'
+//
+// `ChannelName` comes from @tapkart/protocol, not from ../../src/transport: transport.ts imports
+// that type but never re-exports it, so naming it there is TS2305 ("has no exported member").
+import type { ChannelName } from '@tapkart/protocol'
+import type { Transport } from '../../src/transport'
 
 export function spyTransport(
   inner: Transport,
@@ -206,22 +238,51 @@ Expected: PASS.
 
 #### Test 1: convergence and zero steady-state corrections
 
-**What "converged, within epsilon" means here, stated before it is used.** `ClientLoop` has no
-state getter, so this test cannot read the client's predicted kart 0 directly. But per spec
-§5/§8: *"If any field differs by more than its per-field epsilon, the client resets to the
-authoritative value [and this] is a correction"* — `corrections()` increments **if and only if**
-some field of the client's own kart, compared against the just-arrived authoritative value,
-exceeded its contract §4 epsilon. So "the client's own kart stayed within epsilon of authoritative
-truth for the whole window `[S, E]`" and "`corrections()` at `E` minus `corrections()` at `S` equals
-zero" are **the same claim**, not an approximation of it — the correction counter's whole purpose,
-per its own doc comment in the locked contract, is to make this claim observable without a state
-getter. This test asserts the delta is exactly zero over a long steady-state window, and separately
-asserts snapshots actually arrived in that window (a transport that silently dropped every message
-would also show zero corrections, vacuously) and that the counter is a real, live signal
-(comparing warm-up-window corrections, which are *allowed* to be nonzero, against nothing — this
-test does not require warm-up corrections to be nonzero, only that steady-state ones are zero: a
-perfectly-behaved client that never needed to correct even in the first second is the *best* case,
-not a test failure).
+**What "converged, within epsilon" means here, stated before it is used.** Two claims, asserted
+two different ways:
+
+1. **Zero steady-state corrections.** Per spec §5/§8, `corrections()` increments *if and only if*
+   some field of the client's own kart, compared against the just-arrived authoritative value at
+   `snap.tick`, exceeded its contract §4 epsilon. A zero delta across a long window therefore *is*
+   the epsilon claim, not a proxy for it. But it is also what a client that received nothing
+   reports, which is why this test counts the snapshots that actually arrived in the measured
+   window and fails on a floor.
+2. **The client is genuinely on the authority's kart.** `client.state()` and `host.state()` are
+   both locked accessors (contract §5), so this test compares them directly at the end of the run.
+   The tolerance for that comparison is deliberately looser than `EPS`: both loops are at the same
+   tick number but not the same instant of information — the client's present tick is the
+   authority's state at `snap.tick` replayed forward — so the epsilon-tight claim belongs to (1),
+   at the instant (1) compares, and this comparison exists to catch the metre-scale failures a
+   counter cannot see.
+
+Warm-up corrections are *allowed* to be nonzero and are not asserted either way: a client that
+never needed to correct even in the first second is the best case, not a failure.
+
+**This test's setup mirrors Task 15's Step 12 exactly, and not by coincidence.** Task 15 built a
+working prototype of this same invariant and measured four things this brief originally got wrong,
+every one of which manufactures a correction that has nothing to do with quantization:
+
+- **`CHARS8 = [0,0,0,0,0,0,0,0]`,** because `ClientLoop` bootstraps its own state with
+  `characterIdx` all zero (no lobby handshake exists in this plan). A host built with
+  `[0,1,2,…,7]` runs seats 1–7 on *different* `CharacterStats`, their bot trajectories diverge, and
+  a bot eventually collides with kart 0 — a real physics difference the epsilon test would blame on
+  quantization.
+- **`hostState.phase = 'racing'`,** because `ClientLoop`'s constructor sets its own phase to
+  `'racing'`. Left in `'countdown'`, `resolveInputs` freezes every host kart for
+  `COUNTDOWN_TICKS = 180` ticks while the client drives.
+- **`isBot = false` / `connected = true` on seat 0 of the host**, because `createState` defaults
+  every kart to `isBot: true, connected: false` (`packages/sim/src/state.ts:60-61`) and
+  `resolveInputs` routes any such kart through bot AI — so the authority would ignore the client's
+  input entirely and correct on every single snapshot.
+- **Item boxes neutralised**, because an `itemGrant` travels the reliable channel independently of
+  the unreliable snapshot stream and can arrive on either side of a snapshot that already reflects
+  it. That is a timing difference, not noise.
+
+And a **held-steady intent** with `WARMUP_TICKS = 360`: Task 15 measured a varying steer as a
+genuine, non-quantization discrepancy (the authority's held copy lags the client's current value by
+a one-way trip), and measured 180 warm-up ticks as flaky at 1 run in 6 — 0.057 position difference
+against a 0.05 epsilon, a few ticks past the boundary. This brief originally used `scriptedIntent`
+and 180. Both are corrected here. **Do not reintroduce either.**
 
 - [ ] **Step 7: Write the failing test**
 
@@ -230,21 +291,24 @@ Create `packages/net/test/convergence.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
 
-import { MAX_KARTS, createState } from '@tapkart/sim'
+import type { Intent } from '@tapkart/sim'
+import { createState } from '@tapkart/sim'
+import { decodeHeader } from '@tapkart/protocol'
 import { makeLossyPair, makeNetContext } from './fixtures/net-fixtures'
-import { scriptedIntent } from './fixtures/scripted-input'
 import { spyTransport } from './fixtures/spy-transport'
-import { WIRE_TAG_SNAPSHOT, SNAPSHOT_PERIOD_TICKS } from '../src/shadow'
+import { SNAPSHOT_PERIOD_TICKS } from '../src/shadow'
 import { AuthorityLoop } from '../src/authority'
 import { ClientLoop } from '../src/client'
 
 const SEED = 0x20260814
-const CHARS = [0, 1, 2, 3, 4, 5, 6, 7]
+/** All-zero, matching ClientLoop's own bootstrap — see this section's preamble. */
+const CHARS8 = [0, 0, 0, 0, 0, 0, 0, 0]
 const TICK_MS = 1000 / 60
+const OWN = 0
 
-/** 3s: several round trips at the default 150ms latency + 50ms jitter (up to ~400ms RTT), enough
- *  for the first snapshot(s) to arrive and any startup correction to have already happened. */
-const WARMUP_TICKS = 180
+/** 6s. Task 15 measured 180 as flaky for this exact invariant (1 run in 6, 0.057 position
+ *  difference against a 0.05 epsilon a few ticks past the boundary) and settled on 360. */
+const WARMUP_TICKS = 360
 /** 60s total, thousands of ticks, per this task's brief. */
 const RUN_TICKS = 3600
 
@@ -252,11 +316,17 @@ const RUN_TICKS = 3600
  * Expected snapshot arrivals in the steady window: (RUN_TICKS - WARMUP_TICKS) / SNAPSHOT_PERIOD_TICKS
  * datagrams broadcast, independently thinned by the default 5% loss rate. The exact count is
  * deterministic (LoopbackOptions.seed = 0xC0FFEE), but computing it exactly would require depending
- * on Task 12's unverified internal RNG-consumption pattern; asserting a generous lower bound instead
+ * on Task 12's internal RNG-consumption pattern; asserting a generous lower bound instead
  * (70% of the loss-adjusted expectation) still fails hard if the transport is silently broken.
+ * (3600-360)/3 = 1080 broadcasts, x0.95 = 1026 expected, x0.7 = 718.
  */
 const EXPECTED_STEADY_SNAPSHOTS = Math.floor(((RUN_TICKS - WARMUP_TICKS) / SNAPSHOT_PERIOD_TICKS) * 0.95)
 const MIN_STEADY_SNAPSHOTS = Math.floor(EXPECTED_STEADY_SNAPSHOTS * 0.7)
+
+/** Held steady for the whole run: with a constant intent, "the value the authority is still
+ *  holding from N ticks ago" and "the value the client is sending now" are the same number, so the
+ *  comparison is isolated to quantization noise. See this section's preamble. */
+const STEADY: Intent = { tick: 0, steer: 0.3, accel: 1, brake: false, drift: false, useItem: false }
 
 describe('convergence at 150ms/50ms/5% (spec S8)', () => {
   it(
@@ -264,16 +334,28 @@ describe('convergence at 150ms/50ms/5% (spec S8)', () => {
     () => {
       const ctxHost = makeNetContext(true)
       const ctxClient = makeNetContext(false)
-      const hostState = createState(ctxHost, SEED, CHARS)
+      const hostState = createState(ctxHost, SEED, CHARS8)
+      // Every one of these four lines removes a manufactured correction. See preamble.
+      hostState.phase = 'racing'
+      hostState.karts[OWN].isBot = false
+      hostState.karts[OWN].connected = true
+      for (const box of hostState.itemBoxes) box.respawnTicks = 1_000_000
+
       const pair = makeLossyPair() // default: 150ms latency, 50ms jitter, 5% loss, seed 0xC0FFEE
 
       let steadySnapshots = 0
       const clientSideTransport = spyTransport(pair.b, (_peerId, channel, data) => {
-        if (channel === 'unreliable' && data[0] === WIRE_TAG_SNAPSHOT) steadySnapshots++
+        // decodeHeader, not data[0]: the first payload byte of a bit-packed
+        // snapshot is the low byte of state.tick and matches any given constant
+        // about once every 256 snapshots.
+        if (channel === 'unreliable' && decodeHeader(data).kind === 'snapshot') steadySnapshots++
       })
 
       const host = new AuthorityLoop(ctxHost, hostState, pair.a)
-      const client = new ClientLoop(ctxClient, 0, clientSideTransport)
+      const client = new ClientLoop(ctxClient, OWN, clientSideTransport)
+
+      const clientStartX = client.state().karts[OWN].position.x
+      const clientStartZ = client.state().karts[OWN].position.z
 
       let settleCount = -1
       let nowMs = 0
@@ -281,7 +363,7 @@ describe('convergence at 150ms/50ms/5% (spec S8)', () => {
 
       for (let t = 0; t < RUN_TICKS; t++) {
         host.tick()
-        client.tick(scriptedIntent(t, 0))
+        client.tick(STEADY)
         pair.pump(nowMs)
         nowMs += TICK_MS
 
@@ -290,8 +372,6 @@ describe('convergence at 150ms/50ms/5% (spec S8)', () => {
           snapshotsAtWarmup = steadySnapshots
         }
       }
-
-      expect(settleCount).toBeGreaterThanOrEqual(0) // sanity: the counter is a real number by t=180
 
       const steadyCorrections = client.corrections() - settleCount
       expect(steadyCorrections, 'client took a correction after the settle window, from quantization noise alone').toBe(0)
@@ -302,12 +382,32 @@ describe('convergence at 150ms/50ms/5% (spec S8)', () => {
         `only ${snapshotsInSteadyWindow} snapshots reached the client in the steady window; expected >= ${MIN_STEADY_SNAPSHOTS}. A count near zero means the transport delivered nothing and the zero-corrections assertion above is vacuous, not a pass.`,
       ).toBeGreaterThanOrEqual(MIN_STEADY_SNAPSHOTS)
 
-      // The host must still be alive and kart 0 must have actually moved: guards against a
-      // topology bug (e.g. AuthorityLoop never reading input) that would make every assertion above
-      // trivially true because nothing happened anywhere.
-      expect(hostState.tick).toBe(RUN_TICKS)
-      const startX = 0 // createState places seat 0 on the track's start line; exact value unused
-      expect(Math.abs(hostState.karts[0].position.x) + Math.abs(hostState.karts[0].position.z)).toBeGreaterThan(1)
+      // Both loops really ran, and the race really happened: the host reached
+      // every tick, and the client's own kart travelled a long way from where
+      // createState put it. Comparing against the kart's OWN start position,
+      // not against the origin - seat 0 starts at the oval's first control
+      // point, (-200, ., -100), so `|x| + |z| > 1` is 300 before a tick runs.
+      expect(host.state().tick).toBe(RUN_TICKS)
+      expect(client.state().tick).toBe(RUN_TICKS)
+      const travelled = Math.hypot(
+        client.state().karts[OWN].position.x - clientStartX,
+        client.state().karts[OWN].position.z - clientStartZ,
+      )
+      expect(travelled, 'the client never moved, so "converged" is meaningless').toBeGreaterThan(50)
+
+      // And the client converged onto the AUTHORITY's kart, not merely onto
+      // some self-consistent trajectory of its own. Band, not EPS - see the
+      // preamble for why the two questions take different tolerances.
+      const mine = client.state().karts[OWN]
+      const theirs = host.state().karts[OWN]
+      expect(Math.abs(mine.position.x - theirs.position.x)).toBeLessThan(0.5)
+      expect(Math.abs(mine.position.z - theirs.position.z)).toBeLessThan(0.5)
+      expect(Math.abs(mine.velocity.x - theirs.velocity.x)).toBeLessThan(1.0)
+      expect(Math.abs(mine.velocity.z - theirs.velocity.z)).toBeLessThan(1.0)
+      // Deliberately no equality assertion on lap/checkpointIdx here: two karts
+      // half a metre apart can legitimately sit on opposite sides of a
+      // checkpoint line at one arbitrary instant, and a test that flakes on a
+      // correct implementation teaches the next reader to widen it.
     },
     30_000,
   )
@@ -347,120 +447,149 @@ Create `packages/net/test/promotion.test.ts`:
 import { describe, expect, it } from 'vitest'
 
 import type { AuthEvent, SimState } from '@tapkart/sim'
-import { MAX_KARTS, createState, makeIntentBuffer, step } from '@tapkart/sim'
+import { MAX_KARTS, createState } from '@tapkart/sim'
+import { decodeEvents, decodeHeader } from '@tapkart/protocol'
 import { makeLossyPair, makeNetContext } from './fixtures/net-fixtures'
-import { scriptedIntent } from './fixtures/scripted-input'
+import { broadcastScriptedInput } from './fixtures/scripted-input'
 import { spyTransport } from './fixtures/spy-transport'
-import {
-  HOST_TIMEOUT_TICKS,
-  SNAPSHOT_PERIOD_TICKS,
-  ShadowLoop,
-  WIRE_TAG_AUTHORITY_CHANGE,
-  WIRE_TAG_EVENTS,
-  WIRE_TAG_INPUT,
-  WIRE_TAG_SNAPSHOT,
-  decodeAuthorityChange,
-} from '../src/shadow'
+import { HOST_TIMEOUT_TICKS, SNAPSHOT_PERIOD_TICKS, ShadowLoop, decodeAuthorityChange } from '../src/shadow'
+import { AuthorityLoop } from '../src/authority'
 import { applyEvent } from '../src/apply'
-import { encodeEvents } from '../../protocol/src/events'
-import { encodeSnapshot } from '../../protocol/src/snapshot'
 
 const SEED = 0x20260814
-const CHARS = [0, 1, 2, 3, 4, 5, 6, 7]
+const CHARS8 = [0, 0, 0, 0, 0, 0, 0, 0]
 const TICK_MS = 1000 / 60
-
-// Contract SS4, restated here as plain numbers rather than imported: this test's job includes
-// proving the shadow's PUBLISHED state (not its internals) meets the same bar a client's own
-// reconciliation does, independent of protocol/src/quant.ts's internal property names.
-const EPS_POSITION = 0.05
-const EPS_VELOCITY = 0.05
-const EPS_HEADING = 0.0025
-const EPS_ANGULAR_VELOCITY = 0.05
-
-function withinEps(a: number, b: number, eps: number): boolean {
-  return Math.abs(a - b) <= eps
-}
+const OWN = 0
+/** encodeHeader writes tag + protocolVersion; locked contract §3 fixes it at 2. */
+const HEADER_BYTES = 2
 
 /**
- * A minimal, spec-faithful host: runs step() as leader, broadcasts a WireSnapshot every
- * SNAPSHOT_PERIOD_TICKS ticks and any newly-emitted events, both tagged the same way ShadowLoop
- * tags its own broadcasts (Task 16). Written directly here — not via AuthorityLoop — because
- * AuthorityLoop's file (Task 14) does not exist when this task is authored and its exact
- * input-routing topology is not pinned by the locked contract; see this task's Interfaces block.
+ * "Matches within bounds" is a metre-scale claim, not an epsilon-scale one, and the difference is
+ * load-bearing. The shadow's state at tick T is the host's state at T-minus-one-one-way-trip,
+ * corrected and replayed forward with input that arrived on a different schedule; contract §4's
+ * 0.05 m epsilon describes the comparison the RECONCILER makes at snap.tick, not the residue two
+ * independently-scheduled loops carry at the same tick number. 5 m is the band this test asserts:
+ * far tighter than the ~30 m a kart covers in the second before the kill (so a shadow that stopped
+ * tracking fails), and far looser than any legitimate scheduling residue (so a correct one does
+ * not flake).
  */
-function makeFakeHost() {
-  const ctx = makeNetContext(true)
-  let cur = createState(ctx, SEED, CHARS)
-  let scratch = createState(ctx, SEED, CHARS)
-  return {
-    get state(): SimState { return cur },
-    tick(transport: { broadcast(channel: 'unreliable' | 'reliable', data: Uint8Array): void }, tickIndex: number): void {
-      const inputs = makeIntentBuffer()
-      inputs[0] = scriptedIntent(tickIndex, 0)
-      const events: AuthEvent[] = []
-      step(ctx, cur, scratch, inputs, events)
-      const tmp = cur
-      cur = scratch
-      scratch = tmp
+const MATCH_BAND_M = 5.0
 
-      // Stands in for a client also sending kart 0's input straight to the shadow (spec S5: "every
-      // client sends its input to both the host and the server shadow"). Piggybacked on the host's
-      // own broadcast since this test's topology has no separate third party.
-      const inBuf = new Uint8Array(1 + 128)
-      inBuf[0] = WIRE_TAG_INPUT
-      const inputEncode = (out: Uint8Array) => {
-        // Local import to avoid a module-level dependency the rest of the file does not need twice.
-        const { encodeInput } = require('../../protocol/src/input') as typeof import('../../protocol/src/input')
-        return encodeInput(out, 0, [inputs[0], inputs[0], inputs[0], inputs[0], inputs[0], inputs[0], inputs[0], inputs[0]])
-      }
-      const inN = inputEncode(inBuf.subarray(1))
-      transport.broadcast('unreliable', inBuf.subarray(0, inN + 1))
+/**
+ * A live entity that cannot legitimately disappear, seeded identically into both authorities.
+ *
+ * Spec §8 asks the promotion test to prove "no entity disappears", and the only entity whose
+ * disappearance is unambiguously a bug is one that can neither expire nor be struck: `slick` sits
+ * still and only its ttl moves (`entity.ts`'s stepEntity default branch), a ttl far longer than the
+ * run can never reach zero, and at (500, 0, 500) it is hundreds of metres outside the oval, so its
+ * 2.1 m strike radius can never fire. Items the bots pick up will spawn and despawn other entities
+ * legitimately during this run - those are NOT watched, precisely because a seeker that hits a kart
+ * is supposed to vanish.
+ *
+ * Written directly into the pool rather than through spawnEntity() because spawnEntity emits an
+ * 'entitySpawn', which after Task 2 is gated on ctx.isLeader - so seeding the leader and the
+ * follower through it would leave them with different nextEventSeq before the race even starts.
+ */
+const WATCHED_ID = 4242
+const WATCHED_TTL = 60_000
 
-      if (cur.tick % SNAPSHOT_PERIOD_TICKS === 0) {
-        const buf = new Uint8Array(1 + 640)
-        buf[0] = WIRE_TAG_SNAPSHOT
-        const n = encodeSnapshot(buf.subarray(1), cur, new Array(MAX_KARTS).fill(-1))
-        transport.broadcast('unreliable', buf.subarray(0, n + 1))
-      }
-      if (events.length > 0) {
-        const buf = new Uint8Array(1 + 4096)
-        buf[0] = WIRE_TAG_EVENTS
-        const n = encodeEvents(buf.subarray(1), events)
-        transport.broadcast('reliable', buf.subarray(0, n + 1))
-      }
-    },
+function seedWatchedEntity(state: SimState): void {
+  const e = state.entities[state.entityCount]
+  e.entityId = WATCHED_ID
+  e.kind = 'slick'
+  e.ownerId = 0
+  e.position.x = 500
+  e.position.y = 0
+  e.position.z = 500
+  e.velocity.x = 0
+  e.velocity.y = 0
+  e.velocity.z = 0
+  e.heading = 0
+  e.targetId = -1
+  e.ttl = WATCHED_TTL
+  state.entityCount += 1
+  state.nextEntityId = Math.max(state.nextEntityId, WATCHED_ID + 1)
+}
+
+function watchedIn(state: SimState): { entityId: number; ttl: number } | undefined {
+  for (let i = 0; i < state.entityCount; i++) {
+    if (state.entities[i].entityId === WATCHED_ID) return state.entities[i]
   }
+  return undefined
+}
+
+/** Both authorities start from the identical world, which is what makes "matches" meaningful. */
+function makeRaceState(ctx: ReturnType<typeof makeNetContext>): SimState {
+  const s = createState(ctx, SEED, CHARS8)
+  s.phase = 'racing'
+  s.karts[OWN].isBot = false
+  s.karts[OWN].connected = true
+  for (const k of s.karts) k.lap.lap = 1   // nonzero: "lap >= 0" cannot fail, "lap >= 1" can
+  seedWatchedEntity(s)
+  return s
 }
 
 describe('promotion (spec S5, S8)', () => {
   it(
     'the shadow auto-promotes after the host goes silent, with no rewind, no lost entities, no lap regression',
     () => {
-      const host = makeFakeHost()
+      const hostCtx = makeNetContext(true)
       const shadowCtx = makeNetContext(false)
-      const shadowState = createState(shadowCtx, SEED, CHARS)
+      const hostState = makeRaceState(hostCtx)
+      const shadowState = makeRaceState(shadowCtx)
       const pair = makeLossyPair()
 
+      // The spy goes on side A - the HOST's side. ShadowLoop.promote() broadcasts
+      // through its own transport on side B, and the loopback routes b -> a, so a
+      // spy on the shadow's own receive path never sees the message it sends.
       const authorityChanges: { tick: number; eventSeq: number }[] = []
-      const shadowTransport = spyTransport(pair.b, (_peerId, channel, data) => {
-        if (channel === 'reliable' && data[0] === WIRE_TAG_AUTHORITY_CHANGE) {
+      const hostTransport = spyTransport(pair.a, (_peerId, channel, data) => {
+        if (channel === 'reliable' && decodeHeader(data).kind === 'authorityChange') {
           authorityChanges.push(decodeAuthorityChange(data))
         }
       })
+
+      // ...and a second spy on side B records the events the shadow actually
+      // received, so "the shadow applied the host's event stream" is checkable
+      // rather than assumed.
+      let highestEventSeqSeen = -1
+      let eventMessagesSeen = 0
+      const shadowTransport = spyTransport(pair.b, (_peerId, channel, data) => {
+        if (channel !== 'reliable' || decodeHeader(data).kind !== 'events') return
+        eventMessagesSeen++
+        const out: AuthEvent[] = []
+        decodeEvents(data.subarray(HEADER_BYTES), out)
+        for (const ev of out) highestEventSeqSeen = Math.max(highestEventSeqSeen, ev.eventSeq)
+      })
+
+      const host = new AuthorityLoop(hostCtx, hostState, hostTransport)
       const shadow = new ShadowLoop(shadowCtx, shadowState, shadowTransport)
+      const hostStart = {
+        x: hostState.karts[OWN].position.x,
+        z: hostState.karts[OWN].position.z,
+      }
 
       const PRE_KILL_TICKS = 300 // 5s: host is alive and feeding the shadow
-      const POST_KILL_TICKS = 300 // 5s: host goes silent partway through this window
+      const POST_KILL_TICKS = 300 // 5s: host is silent; promotion happens in here
 
       let nowMs = 0
       let lastMatchedTick = -1
-      let hostSnapshotAtKill: SimState | null = null
+      let hostAtMatch: SimState | null = null
+      let shadowAtMatch: SimState | null = null
 
-      const lapMax = new Array(MAX_KARTS).fill(0)
-      const liveEntityIds = new Set<number>()
+      const lapMax = shadowState.karts.map((k) => k.lap.lap)
+      let watchedTtl = watchedIn(shadowState)!.ttl
 
       for (let t = 0; t < PRE_KILL_TICKS; t++) {
-        host.tick(pair.a, t)
+        // Spec S5: every client sends its input to BOTH the host and the shadow.
+        // One loopback pair cannot carry three parties, so the test plays the
+        // client on both sides at 30 Hz - side b reaches the host, side a
+        // reaches the shadow. See this brief's topology note.
+        if (t % 2 === 0) {
+          broadcastScriptedInput(pair.b, OWN, t)
+          broadcastScriptedInput(pair.a, OWN, t)
+        }
+        host.tick()
         pair.pump(nowMs)
         nowMs += TICK_MS
         shadow.tick()
@@ -469,27 +598,47 @@ describe('promotion (spec S5, S8)', () => {
           expect(shadowState.karts[k].lap.lap, `lap regressed for kart ${k} at tick ${t}`).toBeGreaterThanOrEqual(lapMax[k])
           lapMax[k] = shadowState.karts[k].lap.lap
         }
-        for (let i = 0; i < shadowState.entityCount; i++) liveEntityIds.add(shadowState.entities[i].entityId)
+        const w = watchedIn(shadowState)
+        expect(w, `watched entity vanished from the shadow at tick ${t}, ttl ${watchedTtl} last seen`).toBeDefined()
+        expect(w!.ttl, `watched entity ttl jumped at tick ${t}`).toBe(watchedTtl - 1)
+        watchedTtl = w!.ttl
 
-        if (
-          t % SNAPSHOT_PERIOD_TICKS === 0 &&
-          shadowState.tick === host.state.tick &&
-          withinEps(shadowState.karts[0].position.x, host.state.karts[0].position.x, EPS_POSITION) &&
-          withinEps(shadowState.karts[0].position.z, host.state.karts[0].position.z, EPS_POSITION)
-        ) {
-          lastMatchedTick = t
-          hostSnapshotAtKill = structuredClone(host.state)
+        // Capture the last tick on which both authorities were on the SAME tick
+        // number. The condition is only about the clock, never about agreement -
+        // an earlier draft selected the instant by comparing kart 0's position
+        // within epsilon and then "asserted" that same comparison afterwards,
+        // which cannot fail by construction.
+        if (shadowState.tick === host.state().tick) {
+          lastMatchedTick = shadowState.tick
+          hostAtMatch = structuredClone(host.state())
+          shadowAtMatch = structuredClone(shadowState)
         }
       }
 
-      // The shadow must have matched the host closely at least once before the kill — otherwise the
-      // "matches the host's last checkpoint" assertion below would be checking against nothing.
-      expect(lastMatchedTick, 'the shadow never converged onto the host before the kill').toBeGreaterThan(0)
-      const hostAtKill = hostSnapshotAtKill as SimState
+      // Both loops advance exactly one tick per call from the same starting
+      // tick, so the same-tick condition holds on every iteration and the last
+      // capture is the last pre-kill tick. Asserting the exact number rather
+      // than "> 0" is what makes a loop that skipped or double-stepped a
+      // failure here instead of a silently earlier snapshot.
+      expect(lastMatchedTick, 'the two authorities desynchronised before the kill').toBe(PRE_KILL_TICKS)
+      expect(hostAtMatch).not.toBeNull()
+      expect(shadowAtMatch).not.toBeNull()
+      const hostAtKill = hostAtMatch as SimState
+      const shadowAtKill = shadowAtMatch as SimState
+
+      // The shadow really was following the host's event stream, not just its
+      // snapshots: a follower's nextEventSeq advances ONLY by applying received
+      // events (contract §1b), so this equality is only reachable by applying
+      // every one of them, and applying none leaves it at 0.
+      if (eventMessagesSeen > 0) {
+        expect(shadowState.nextEventSeq).toBe(highestEventSeqSeen + 1)
+      }
 
       for (let t = 0; t < POST_KILL_TICKS; t++) {
-        // Host is silent from here: no more host.tick() calls, no more pair.pump() traffic sourced
-        // from the host side. The shadow keeps ticking on its own.
+        // The host is dead: no host.tick(), and nothing is broadcast on side b
+        // any more. The client keeps feeding the shadow, which is exactly what
+        // spec S5's dual send buys.
+        if (t % 2 === 0) broadcastScriptedInput(pair.a, OWN, PRE_KILL_TICKS + t)
         pair.pump(nowMs)
         nowMs += TICK_MS
         shadow.tick()
@@ -498,20 +647,16 @@ describe('promotion (spec S5, S8)', () => {
           expect(shadowState.karts[k].lap.lap, `lap regressed for kart ${k} post-kill tick ${t}`).toBeGreaterThanOrEqual(lapMax[k])
           lapMax[k] = shadowState.karts[k].lap.lap
         }
-        const nowLive = new Set<number>()
-        for (let i = 0; i < shadowState.entityCount; i++) nowLive.add(shadowState.entities[i].entityId)
-        for (const id of liveEntityIds) {
-          // An entity may legitimately expire; it must never simply vanish without its ttl having
-          // run out. shadowState only exposes the CURRENT ttl, so an entity gone this tick is only
-          // acceptable if it is no longer tracked as live — remove it from the watch set either way
-          // and rely on the ring-buffer-free "ttl decrements by exactly 1/tick" definition to make
-          // "vanished with ttl > 1 last seen" the only failure worth catching, which the promotion
-          // mechanism (no rewind) rules out by construction: a rewind is the only way state could
-          // otherwise disappear, and ShadowLoop's own tests (Task 16) already prove promotion never
-          // rewinds tick, so this loop only needs to keep the watch set current.
-        }
-        liveEntityIds.clear()
-        for (const id of nowLive) liveEntityIds.add(id)
+        // "No entity disappears", asserted rather than reasoned about. The
+        // watched entity cannot expire (ttl 60000) and cannot be struck
+        // (unreachable position), so it has no legal way to leave the pool -
+        // through the promotion tick or any other. Its ttl must also walk down
+        // by exactly one per tick, which is what catches a promotion that
+        // rebuilt state from an older buffer instead of continuing forward.
+        const w = watchedIn(shadowState)
+        expect(w, `watched entity vanished post-kill at tick ${t}, ttl ${watchedTtl} last seen`).toBeDefined()
+        expect(w!.ttl, `watched entity ttl jumped post-kill at tick ${t}`).toBe(watchedTtl - 1)
+        watchedTtl = w!.ttl
       }
 
       expect(authorityChanges).toHaveLength(1)
@@ -520,11 +665,37 @@ describe('promotion (spec S5, S8)', () => {
       // silent — lands within a small, bounded window of PRE_KILL_TICKS + HOST_TIMEOUT_TICKS.
       expect(authorityChanges[0].tick).toBeGreaterThanOrEqual(PRE_KILL_TICKS)
       expect(authorityChanges[0].tick).toBeLessThan(PRE_KILL_TICKS + HOST_TIMEOUT_TICKS + SNAPSHOT_PERIOD_TICKS + 5)
+      expect(shadowCtx.isLeader, 'the shadow never actually switched to leader mode').toBe(true)
 
-      // "Matches the host's last checkpoint within bounds": compare the shadow's state at the tick
-      // it last agreed with the host against that saved host state, at that SAME tick.
-      expect(shadowCtx).toBeDefined() // documents that ctx.isLeader flips are exercised via authorityChanges above
-      expect(withinEps(hostAtKill.karts[0].position.x, hostAtKill.karts[0].position.x, EPS_POSITION)).toBe(true) // trivial identity guard
+      // "Matches the host's last checkpoint within bounds" (spec S8), asserted
+      // between the SHADOW's captured state and the HOST's captured state, at
+      // the same tick. Every kart, both horizontal axes.
+      expect(shadowAtKill.tick).toBe(hostAtKill.tick)
+      for (let k = 0; k < MAX_KARTS; k++) {
+        const s = shadowAtKill.karts[k]
+        const h = hostAtKill.karts[k]
+        expect(
+          Math.abs(s.position.x - h.position.x),
+          `kart ${k} x diverged by more than ${MATCH_BAND_M}m at tick ${hostAtKill.tick}`,
+        ).toBeLessThan(MATCH_BAND_M)
+        expect(
+          Math.abs(s.position.z - h.position.z),
+          `kart ${k} z diverged by more than ${MATCH_BAND_M}m at tick ${hostAtKill.tick}`,
+        ).toBeLessThan(MATCH_BAND_M)
+      }
+      // ...and the world was actually moving, so "within 5 m of each other" is
+      // not two frozen grids agreeing about nothing. Seat 0 is the only human
+      // seat, so if the shadow never received the client's input it sits at
+      // accel 0 while the host drives away - which the band above catches only
+      // because this line proves the host drove away at all.
+      const hostTravelled = Math.hypot(
+        hostAtKill.karts[OWN].position.x - hostStart.x,
+        hostAtKill.karts[OWN].position.z - hostStart.z,
+      )
+      expect(
+        hostTravelled,
+        'the host kart never moved, so the match assertion is comparing two grids',
+      ).toBeGreaterThan(20)
     },
     30_000,
   )
@@ -546,12 +717,12 @@ describe('promotion (spec S5, S8)', () => {
 })
 ```
 
-Note: the `require(...)` inside `makeFakeHost` is deliberate CommonJS interop inside an ESM test
-file, used once to avoid importing `encodeInput` at module scope purely for a single inline call;
-Vitest's Node environment supports it. If the project's lint config forbids `require` even here,
-replace it with a top-level `import { encodeInput } from '../../protocol/src/input'` instead — either
-is fine, the CommonJS form is written here only to keep the import list at the top of the file
-focused on what the rest of the file needs directly.
+Note: there is no `require(...)` anywhere in this file. An earlier draft used one inside a
+hand-rolled `makeFakeHost` to pull in `encodeInput`, calling it "deliberate CommonJS interop that
+Vitest's Node environment supports." Every package here sets `"type": "module"` and Vitest
+transforms to ESM, where `require` is not defined at all — it would have thrown
+`ReferenceError: require is not defined` on the first host tick. Every import in this file is a
+top-level ESM import.
 
 - [ ] **Step 11: Run the test and confirm the RED**
 
@@ -564,11 +735,13 @@ suite should reach the real assertions.
 - [ ] **Step 12: Run to confirm the GREEN**
 
 Run: `npx vitest run packages/net/test/promotion.test.ts`
-Expected: PASS — 2 tests. A lap-regression failure names the exact kart and tick
-(`lap regressed for kart N at tick T`); an entity or eventSeq failure names the exact assertion that
-tripped. Do not weaken `lapMax`/`liveEntityIds` bookkeeping to make a failure disappear — trace it
-into `ShadowLoop.reconcile`/`promote` (Task 16) instead, since that is the only place state can move
-backward.
+Expected: PASS — 2 tests. Every assertion in the scripted scenario names what tripped: a lap
+regression names the kart and tick, a vanished entity names its id and the ttl it was last seen
+with, a ttl jump names the tick, and the match assertion names the kart and the axis. Do not weaken
+the `lapMax` seeding, the watched-entity bookkeeping or `MATCH_BAND_M` to make a failure disappear —
+each of those was a real assertion added to replace one that could not fail, and the place to trace
+a failure is `ShadowLoop.reconcile`/`promote` (Task 16) or `AuthorityLoop.tick` (Task 14), which are
+the only places state can move backward or stop tracking.
 
 ---
 
@@ -592,14 +765,18 @@ Create `packages/net/test/latejoin.test.ts`:
 import { describe, expect, it } from 'vitest'
 
 import { createState, makeIntentBuffer, statesEqual, step } from '@tapkart/sim'
+import { encodeCheckpoint, decodeCheckpoint } from '@tapkart/protocol'
 import { makeNetContext } from './fixtures/net-fixtures'
 import { scriptedIntent } from './fixtures/scripted-input'
-import { encodeCheckpoint, decodeCheckpoint } from '../../protocol/src/checkpoint'
 
 const SEED = 0x20260814
 const CHARS = [0, 1, 2, 3, 4, 5, 6, 7]
 const PRE_CHECKPOINT_TICKS = 400
 const POST_CHECKPOINT_TICKS = 800
+/** Task 8 asserts encodeCheckpoint returns 5384 bytes for this SimState shape.
+ *  DataView.setFloat64 past the end of the view throws RangeError, so a 4096-byte
+ *  buffer - what an earlier draft of this brief used - fails on the first call. */
+const CHECKPOINT_BUF_BYTES = 8192
 
 function driveOneTick(ctx: ReturnType<typeof makeNetContext>, cur: ReturnType<typeof createState>, scratch: ReturnType<typeof createState>, tickIndex: number) {
   const inputs = makeIntentBuffer()
@@ -617,7 +794,7 @@ describe('late join via AuthorityCheckpoint (spec S5, S8)', () => {
       ;[cur, scratch] = driveOneTick(ctx, cur, scratch, t)
     }
 
-    const buf = new Uint8Array(4096)
+    const buf = new Uint8Array(CHECKPOINT_BUF_BYTES)
     const n = encodeCheckpoint(buf, cur)
     expect(n).toBeGreaterThan(0)
 
@@ -635,7 +812,7 @@ describe('late join via AuthorityCheckpoint (spec S5, S8)', () => {
       ;[source, sourceScratch] = driveOneTick(ctx, source, sourceScratch, t)
     }
 
-    const buf = new Uint8Array(4096)
+    const buf = new Uint8Array(CHECKPOINT_BUF_BYTES)
     const n = encodeCheckpoint(buf, source)
     let joiner = createState(ctx, SEED, CHARS)
     decodeCheckpoint(buf.subarray(0, n), joiner)
@@ -658,9 +835,11 @@ describe('late join via AuthorityCheckpoint (spec S5, S8)', () => {
 - [ ] **Step 14: Run the test and confirm the RED**
 
 Run: `npx vitest run packages/net/test/latejoin.test.ts`
-Expected: FAIL with `Failed to resolve import "../../protocol/src/checkpoint"` if Task 8 has not
-landed in this working tree yet (it precedes Task 17, so by execution time it exists); once it
-resolves, a genuine `encodeCheckpoint is not a function` names the same gap more specifically.
+Expected: FAIL with `TypeError: encodeCheckpoint is not a function`. `@tapkart/protocol`'s barrel
+exists from Task 3 and every codec task widens it, so the specifier resolves; a name the barrel does
+not carry binds to `undefined` under Vitest's esbuild transform and fails at the call site, not at
+import time. (Task 8 precedes Task 17, so by execution time the name is there and this step is about
+confirming the test file itself is wired up correctly.)
 
 - [ ] **Step 15: Run to confirm the GREEN**
 
@@ -677,6 +856,7 @@ catch, and the fix belongs in `packages/protocol/src/checkpoint.ts`, not in this
 Run: `npx tsc --noEmit -p packages/net && npx vitest run packages/net`
 Expected: PASS, zero type errors, every `packages/net` test green, including this task's 5
 integration tests (1 + 2 + 2) across roughly 3600 + 600 + 1200 = 5400 simulated ticks total.
+The promotion test runs two full authorities side by side, so it simulates 600 ticks twice.
 
 - [ ] **Step 17: Commit**
 
@@ -686,17 +866,23 @@ git add packages/net/test/fixtures/scripted-input.ts packages/net/test/fixtures/
 git commit -m "test(net): add the three netcode integration tests spec S8 names
 
 Convergence: AuthorityLoop + ClientLoop over a 150ms/50ms/5% LoopbackPair
-for 3600 ticks; because ClientLoop exposes no state getter, 'stays within
-epsilon' is proven equivalent to and asserted as zero corrections() delta
-across a 3420-tick steady window, with a snapshot-arrival floor guarding
-against a vacuous pass from a silently broken transport.
+for 3600 ticks, on a held-steady intent with the host set up exactly as
+Task 15's own flagship test sets it up (all-zero characterIdx, phase
+racing, seat 0 human and connected, item boxes neutralised) - every one
+of those removes a correction that has nothing to do with quantization.
+Asserts a zero corrections() delta across the 3240-tick steady window, a
+floor on snapshots that actually arrived (a dead transport also reports
+zero corrections), and, through the contract's state() accessors, that
+the client's own kart really is where the authority's is.
 
-Promotion: a minimal, spec-faithful host (step() + protocol's locked
-encoders, not AuthorityLoop, whose file and input topology are not yet
-verifiable) feeds a ShadowLoop for 300 ticks, then goes silent for 300
-more. Asserts exactly one authorityChange, no per-kart lap regression, no
-entity vanishing without its ttl expiring, and that applyEvent refuses a
-redelivered eventSeq.
+Promotion: a real AuthorityLoop feeds a real ShadowLoop for 300 ticks
+with the client's input broadcast to both, then goes silent for 300 more.
+Asserts exactly one authorityChange (observed on the HOST's side, which
+is where a b->a broadcast lands), no per-kart lap regression from a
+seeded nonzero lap, that a seeded entity which cannot expire or be struck
+is still live with a ttl that walked down by exactly one per tick, and
+that the shadow's captured state matches the host's captured state at the
+same tick within a stated band.
 
 Late join: encodeCheckpoint/decodeCheckpoint round-trips a SimState
 exactly (statesEqual, not an epsilon), and a joiner restored from that
@@ -707,15 +893,22 @@ across the wire format a real late joiner receives."
 
 ---
 
-**Ambiguities and dependencies flagged for the plan's author:**
+**Dependencies and open limits flagged for the plan's author:**
 
-1. Same as Task 16's: the one-byte `WIRE_TAG_*` message-kind convention is defined in `shadow.ts`
-   and assumed by every fixture/test here; Tasks 11, 14 and 15 must share it.
-2. `AuthorityLoop`'s exact input-routing (it takes no input parameter, so it must read every kart's
-   input from its own `Transport`, presumably the same way `ShadowLoop` does) is inferred from spec
-   text, not pinned by a signature. Test 1 depends on this inference being correct for `AuthorityLoop`
-   specifically; Tests 2 and 3 avoid the dependency entirely by not using `AuthorityLoop`.
-3. `ClientLoop` exposing no state getter is a real gap for any test wanting to assert its predicted
-   `SimState` numerically. This task resolves it for the convergence test via `corrections()`'s
-   documented semantics; a future task wanting a stronger, more direct assertion would need
-   `ClientLoop`'s signature amended, which this task does not do (the locked contract forbids it).
+1. **Open: one loopback pair cannot carry spec §5's three-party topology.** Both tests here place
+   two loops on one pair and let the test itself play the client on both sides. That covers the
+   dual-send behaviour but not a real third peer, and `ClientLoop.tick()` still broadcasts on a
+   single `Transport` - so "every client sends its input to both the host and the server shadow"
+   is structurally unimplemented in `net`, not merely untested. Closing it needs either a
+   multi-peer transport or a second `Transport` argument on `ClientLoop`, and both are outside the
+   contract's §5 module map.
+2. **Settled: the message header.** An earlier draft of this brief inherited Task 16's private
+   `WIRE_TAG_*` bytes. Contract §3's `WIRE_TAG`/`encodeHeader`/`decodeHeader` replace them; every
+   fixture and test in this file frames and dispatches through those.
+3. **Settled: the state accessors.** `AuthorityLoop.state()` and `ClientLoop.state()` are in the
+   locked contract, so neither test needs a workaround, and Test 2 drives real loops rather than a
+   hand-rolled host.
+4. **Depends on Task 12's loopback delivering `a -> b` and `b -> a` and on `close()` not being
+   needed to stop a peer.** Test 2 kills the host by ceasing to call `host.tick()` and ceasing to
+   broadcast on side `b`, rather than by calling `close()`, because `Transport.close()`'s effect on
+   an in-flight queue is Task 12's business and this test does not need to depend on it.
