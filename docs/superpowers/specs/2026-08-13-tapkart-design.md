@@ -145,6 +145,25 @@ allocation-free-by-magic: `step(prev, next, inputs, tick)` writes into a
 caller-owned `next` buffer, and the loops double-buffer. No wall-clock reads, no
 `Math.random()`, no I/O.
 
+**It also means instanceable, and Plan 1 shipped one violation of that.**
+*Amended 2026-08-14.* The 30 Hz bot-input hold lives in `packages/sim/phase.ts`
+at module scope — the only mutable binding in the package that survives a call,
+so it belongs to the *process*, not to a `SimState`. Two rooms ticking in one
+Node process interleave their `resolveInputs` calls and drive each other's bots:
+measured at 3 cm of positional divergence after 40 ticks, silently, with no error
+and no failing test. That contradicts §5's "one 60Hz arcade sim per active room"
+and §11's rooms-per-process budget.
+
+**Plan 2 moves the hold into `SimState`** (a `heldBotIntent: Intent[]` of
+`MAX_KARTS` plus its parity tick). This is a locked-contract amendment, and it is
+done at the *start* of Plan 2 rather than later because it edits `types.ts` and
+gets strictly more expensive once `net`, `server` and `game` import the package.
+It also makes the checkpoint-parity precondition **evaporate**: with the hold
+inside the state, `cloneState` carries it, any tick becomes a legal checkpoint,
+and `replayRun`'s `RangeError` guard retires. That guard stays until the move
+lands, because until then it is the only thing between a caller and silent
+divergence.
+
 **Tracks are data, not models.** A track is a centerline spline (Catmull-Rom
 control points) plus width profile, banking, surface segments, ramps, boost
 pads, item-box positions, shortcut branches, and a checkpoint ring. `render`
@@ -354,14 +373,46 @@ Per-kart record, bit-packed:
 | t along segment | 10 |
 | player id | 3 |
 | bot/connected flags | 1 |
-| **total** | **162 bits ≈ 21 B** |
+| boost timer | 7 |
+| respawn timer | 7 |
+| shielded | 1 |
+| **total** | **178 bits** |
+
+*The `bot/connected flags` row above is **two** bits, one each, not one shared
+bit. `isBot === !connected` happens to hold in shipped code but nothing enforces
+it, and the drop/reclaim path in "Other failure handling" is exactly where they
+could legitimately disagree for a tick.*
 
 **Invariant:** the per-kart record is a complete projection of every field in
 `SimState`'s kart struct. A field absent from this table cannot exist in the
 kart struct.
 
-Entity record: `{entityId u16, kind u4, ownerId u3, position 3×u16, packed
-velocity/heading u16, ttl u8}` ≈ 12 B. Typically 0–6 live, capped at 32.
+*Amended 2026-08-14, after Plan 1's whole-branch review found the invariant
+already violated.* `KartState` carries four fields the original table omitted.
+Three are per-tick dynamic state that directly gates prediction and are now
+listed above: `boostTicks` (7 bits — it gates a ×1.35 speed multiplier for up
+to 90 ticks, so a client reconciling without it mispredicts speed for 1.5 s
+after every boost), `respawnTicks` (7 bits — it drives the whole respawn
+interpolation and the motion lock), and `shielded` (1 bit — it decides whether
+the next hit spins you out). The fourth, `characterIdx`, is deliberately **not**
+here: it is static for the race and arrives over the reliable channel at
+character select, so it is not per-tick state and the invariant does not reach
+it. That exception is stated so the next reader does not "fix" it.
+
+Entity record: `{entityId u16, kind u4, ownerId u3, position 3×u16,
+velocity 3×u12, heading u12, ttl u16}` = **135 bits**. Typically 0–6 live,
+capped at 32.
+
+*Amended 2026-08-14, twice.* First, `ttl` was `u8`, which maxes at 255 while
+`Tuning.entityTtl` is **600** — the wire format could not represent the tuning
+the simulation actually runs, and a live seeker at `ttl 560` appears in the
+shipped golden fixture. Widened to `u16`.
+
+Second, velocity and heading were a single packed `u16`. That is incompatible
+with the protocol's `WireEntity.velocity: Vec3`, which needs three independent
+components, and entities are *interpolated* rather than predicted — per-axis
+velocity is precisely what makes that interpolation good. Split into
+`velocity 3×u12` + `heading u12`. Costs ~4 B per live entity, capped at 32.
 
 Header: `tick u32`, `eventSeq u32`, per-player `lastProcessedInputTick` (8 ×
 u16), entity count u8 ≈ 25 B.
@@ -370,9 +421,22 @@ u16), entity count u8 ≈ 25 B.
 
 | | Typical (6 entities) | Worst case (32 entities) |
 |---|---|---|
-| Snapshot size | ~265 B | ~610 B |
-| Down per client @20Hz | ~5.3 KB/s | ~12 KB/s |
-| Host up (8 peers + shadow) | ~48 KB/s | ~110 KB/s |
+| Snapshot size | ~304 B | ~743 B |
+| Down per client @20Hz | ~6.1 KB/s | ~14.9 KB/s |
+| Host up (8 peers + shadow) | ~55 KB/s | ~134 KB/s |
+
+*Recomputed 2026-08-14 from the bit counts rather than from rounded byte figures:
+`8 × 178` bits of karts + `135` bits per live entity + a `200`-bit header, all in
+one continuously bit-packed stream with no per-record padding. Typical is
+`2434 bits ≈ 304 B`; worst case is `5944 bits ≈ 743 B`.*
+
+*The worst case is up from ~110 KB/s to ~134 KB/s on the host's uplink. That is
+still inside what wifi and LTE carry comfortably, and it only occurs with all 32
+entity slots live — a state the pool cap makes rare and bounded. The alternative
+was a snapshot that cannot reconcile boost, respawn or shield state at all, and an
+entity velocity too coarse to interpolate well. Delta encoding against the last
+acked snapshot remains the available optimisation if this ever proves tight; v1
+still ships uncompressed.*
 
 Comfortable on wifi and LTE. Delta encoding against the last acked snapshot is
 an available optimization if the worst case proves tight; v1 ships uncompressed.
@@ -383,10 +447,28 @@ The client runs `step()` locally at 60Hz on its own input immediately and keeps
 a ring buffer of `(tick, input, SimCheckpoint)` — full precision, in memory.
 
 When a `WireSnapshot` arrives, the client dequantizes the authoritative state
-for its own kart at `lastProcessedInputTick` and compares. If any field differs
-by more than its **per-field epsilon**, the client resets to the authoritative
-value and replays every buffered input forward to the present frame. At 100ms
-RTT that is 6–10 ticks of a cheap arcade simulation — well under a millisecond.
+for its own kart and compares it against its own buffered state **at
+`snap.tick`**. If any field differs by more than its **per-field epsilon**, the
+client resets to the authoritative value and replays every buffered input
+forward to the present frame. At 100ms RTT that is 6–10 ticks of a cheap arcade
+simulation — well under a millisecond.
+
+*Amended 2026-08-14. This paragraph originally said the comparison happens "at
+`lastProcessedInputTick`", and that is wrong in a way that only shows up under
+load.* A `WireSnapshot` carries **one** `tick` describing a single coherent
+state of the world. `lastProcessedInputTick` is a *different*, per-player number
+— the newest input from that player the authority had folded in — and under real
+latency it lags `snap.tick`. Comparing the authoritative state at one instant
+against the predicted state at another guarantees a mismatch on almost every
+snapshot. A Plan 2 author built a working prototype of the literal reading and
+measured **hundreds** of spurious corrections in the steady-state test that is
+supposed to see zero; the task's independently-written shadow-authority brief had
+already reached the same conclusion unprompted.
+
+`lastProcessedInputTick` keeps its real job: it tells the client **which buffered
+inputs the authority has already consumed**, and therefore which ones must be
+replayed forward after a reset. It is an input-buffer cursor, not a comparison
+instant.
 
 Each epsilon is derived from, and must exceed, that field's quantization step —
 otherwise quantization noise alone triggers a correction every single snapshot
@@ -405,6 +487,28 @@ travel the reliable channel carrying a **global monotonic `eventSeq`** assigned
 by the current authority. Clients apply each event once and ignore any
 `eventSeq` at or below the highest already applied — which is what makes
 migration safe.
+
+**Only an authority emits, and Plan 1 ships this half-done.** *Amended
+2026-08-14.* "Assigned by the current authority" has a consequence the sim did
+not honour: `emit()` both appends the event **and** advances `SimState.nextEventSeq`,
+a field `statesEqual` compares and `AuthorityCheckpoint` carries. Plan 1 gates
+`emit` on `ctx.isLeader` at 3 of its 11 call sites, so a follower running
+identical inputs advances the counter by a *different* amount than the leader —
+provably, by the count of item grants plus phase finishes. `phase.ts` even names
+the hazard in a comment before seven other sites commit it.
+
+**The rule, applied to all eleven sites: a non-leader never emits.** Gating
+*none* of them does not work, because item rolls are leader-only by design, so
+the leader emits an `itemGrant` a follower can never produce locally — the
+counters diverge either way. Gating all of them does work: a follower's
+simulation is unchanged (spin-outs, respawns and lap crossings still *happen*;
+only their announcement is suppressed), and its `nextEventSeq` is set by the
+events it **applies** from the wire. That is what "assigned by the current
+authority" means operationally, and it is what §5's promotion test — "no event is
+applied twice" — is written against.
+
+This could not be fixed inside Plan 1 because the apply side does not exist
+there; `net` owns it. Plan 2 implements both halves together.
 
 The local kart's hit reaction plays on receipt, not on prediction. The resulting
 small delay reads far better than a dodged shell rewinding into the player's
