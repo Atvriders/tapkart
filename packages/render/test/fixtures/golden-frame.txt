@@ -1,0 +1,58 @@
+kart 0 playerId=0.000000 visible=true position=246.111565,0.410046,33.378662 heading=1.997206 roll=0.157294 wheelSpin=-0.646272 steerAngle=0.173824 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 1 playerId=1.000000 visible=true position=238.177612,1.660770,33.086607 heading=1.605831 roll=0.157858 wheelSpin=1.366260 steerAngle=0.024447 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 2 playerId=2.000000 visible=true position=240.722526,1.233604,32.342067 heading=1.617613 roll=0.154128 wheelSpin=2.068056 steerAngle=0.024496 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=true
+kart 3 playerId=3.000000 visible=true position=242.980841,0.755831,26.736407 heading=1.534689 roll=0.128369 wheelSpin=1.340196 steerAngle=0.083122 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 4 playerId=4.000000 visible=true position=236.537142,1.398546,23.641644 heading=1.589787 roll=0.113872 wheelSpin=-1.382815 steerAngle=-0.024065 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 5 playerId=5.000000 visible=true position=243.553936,0.488777,19.007257 heading=1.477724 roll=0.092484 wheelSpin=-2.651001 steerAngle=0.073322 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 6 playerId=6.000000 visible=true position=236.310544,0.762294,13.072520 heading=1.570085 roll=0.062872 wheelSpin=-0.898132 steerAngle=-0.002674 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+kart 7 playerId=7.000000 visible=true position=247.591353,0.070245,12.429523 heading=1.430924 roll=0.062427 wheelSpin=2.079790 steerAngle=0.091476 alpha=1.000000 driftSparkTier=-1.000000 boostFlame=0.000000 shieldVisible=false
+entity 0 entityId=1.000000 kind='slick' visible=true position=243.610288,-0.573440,-21.540616 heading=0.500000 scale=1.200000
+entity 1 entityId=2.000000 kind='bubble' visible=true position=240.907003,1.233604,30.350593 heading=-1.478427 scale=0.600000
+entity 2 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 3 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 4 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 5 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 6 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 7 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 8 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 9 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 10 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 11 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 12 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 13 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 14 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 15 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 16 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 17 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 18 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 19 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 20 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 21 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 22 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 23 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 24 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 25 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 26 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 27 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 28 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 29 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 30 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+entity 31 entityId=-1.000000 kind='seeker' visible=false position=0.000000,0.000000,0.000000 heading=0.000000 scale=1.600000
+camera position=249.522820,3.232071,23.068256 lookAt=243.676751,0.352276,40.029260 up=0.000000,1.000000,0.000000 fovDegrees=62.000000 mode='chase'
+hud place=2.000000 lap=2.000000 speedKph=144.000000 countdownLabel='' raceClock='0:02.000'
+itembox 0 alpha=1.000000
+itembox 1 alpha=1.000000
+itembox 2 alpha=1.000000
+itembox 3 alpha=1.000000
+itembox 4 alpha=1.000000
+itembox 5 alpha=1.000000
+itembox 6 alpha=1.000000
+itembox 7 alpha=1.000000
+itembox 8 alpha=1.000000
+itembox 9 alpha=1.000000
+itembox 10 alpha=1.000000
+itembox 11 alpha=1.000000
+itembox 12 alpha=1.000000
+itembox 13 alpha=1.000000
+itembox 14 alpha=1.000000
+itembox 15 alpha=1.000000
