@@ -388,6 +388,74 @@ describe('guest correction smoothing', () => {
     expect(view.karts[1].position.x).toBeCloseTo(8, 12)
     expect(view.karts[1].heading).toBeCloseTo(0, 12)
   })
+
+  it('keeps an older residual at alpha 0 when a second correction lands', () => {
+    let sample = 0
+    const fake = makeFakeGuest({
+      localPlayerId: 1,
+      correctionDelta: (outPos) => {
+        sample++
+        outPos.y = 0
+        outPos.z = 0
+        if (sample === 1) {
+          outPos.x = 0.2
+          return 0.02
+        }
+        if (sample === 3) {
+          outPos.x = 0.1
+          return 0.01
+        }
+        outPos.x = 0
+        return null
+      },
+    })
+    const builder = createViewBuilder(fake)
+    const stateKart = fake.state().karts[1]
+    const previousKart = fake.prevState().karts[1]
+    const view = fake.currentView()
+
+    // First correction: net moved 8 -> 8.2 and 0 -> 0.02. At alpha 1 its
+    // inverse leaves the old visual pose unchanged.
+    previousKart.position.x = 8
+    previousKart.heading = 0
+    stateKart.position.x = 8.2
+    stateKart.heading = 0.02
+    fake.state().tick = 1
+    builder.build(1, view)
+    expect(view.karts[1].position.x).toBeCloseTo(8, 12)
+    expect(view.karts[1].heading).toBeCloseTo(0, 12)
+
+    // One ordinary tick leaves a nonzero eased residual.
+    previousKart.position.x = 8.2
+    previousKart.heading = 0.02
+    stateKart.position.x = 8.3
+    stateKart.heading = 0.03
+    fake.state().tick = 2
+    builder.build(1, view)
+    const priorVisualX = view.karts[1].position.x
+    const priorVisualHeading = view.karts[1].heading
+    const retainedX = priorVisualX - stateKart.position.x
+    const retainedHeading = wrapAngle(priorVisualHeading - stateKart.heading)
+    expect(Math.abs(retainedX)).toBeGreaterThan(1e-6)
+    expect(Math.abs(retainedHeading)).toBeGreaterThan(1e-6)
+
+    // The second tick moved ordinarily from 8.3/0.03 to 8.4/0.04, then net
+    // corrected it by +0.1/+0.01 to 8.5/0.05. Alpha 0 must retain the OLD
+    // residual; alpha 1 must add the new inverse to hide only that correction.
+    previousKart.position.x = 8.3
+    previousKart.heading = 0.03
+    stateKart.position.x = 8.5
+    stateKart.heading = 0.05
+    fake.state().tick = 3
+
+    builder.build(0, view)
+    expect(view.karts[1].position.x).toBeCloseTo(priorVisualX, 12)
+    expect(view.karts[1].heading).toBeCloseTo(priorVisualHeading, 12)
+
+    builder.build(1, view)
+    expect(view.karts[1].position.x).toBeCloseTo(8.4 + retainedX, 12)
+    expect(view.karts[1].heading).toBeCloseTo(0.04 + retainedHeading, 12)
+  })
 })
 
 describe('derived fields', () => {

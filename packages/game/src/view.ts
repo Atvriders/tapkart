@@ -53,6 +53,8 @@ class ViewBuilderImpl implements ViewBuilder {
   private readonly order = new Int32Array(MAX_KARTS)
   private readonly entityIds = new Int32Array(MAX_ENTITIES)
   private readonly offset: VisualOffset = createVisualOffset()
+  private readonly offsetFrom: Vec3 = { x: 0, y: 0, z: 0 }
+  private offsetHeadingFrom = 0
   private readonly correctionPos: Vec3 = { x: 0, y: 0, z: 0 }
 
   // P2-R29: ViewBuilder is the sampler caller and owns exactly one buffer of
@@ -60,7 +62,6 @@ class ViewBuilderImpl implements ViewBuilder {
   private readonly kartSample: RemoteSample = makeRemoteSample()
   private readonly entitySample: RemoteEntitySample = makeRemoteEntitySample()
   private lastSeenTick: number
-  private correctionSeedTick = -1
 
   constructor(session: RaceSession) {
     this.session = session
@@ -163,6 +164,16 @@ class ViewBuilderImpl implements ViewBuilder {
       const ticksElapsed = state.tick - this.lastSeenTick
       if (ticksElapsed > 0) {
         this.lastSeenTick = state.tick
+        // A render frame describes the interval from the prior sim endpoint to
+        // this one. Retain both offset endpoints so alpha interpolates the
+        // visual correction over that same interval. This matters both while a
+        // correction decays and when a new correction lands before the old
+        // residual is gone: alpha 0 must keep the old residual, while alpha 1
+        // carries the old residual plus the new inverse in full.
+        this.offsetFrom.x = this.offset.current.x
+        this.offsetFrom.y = this.offset.current.y
+        this.offsetFrom.z = this.offset.current.z
+        this.offsetHeadingFrom = this.offset.currentHeading
         const correctionHeading = session.correctionDelta(this.correctionPos)
         if (correctionHeading === null) {
           advanceVisualOffset(this.offset, this.correctionPos, null, ticksElapsed, this.offset)
@@ -181,21 +192,21 @@ class ViewBuilderImpl implements ViewBuilder {
             ticksElapsed,
             this.offset,
           )
-          this.correctionSeedTick = state.tick
         }
       }
 
       const localView = out.karts[localId]
-      // On the reconciliation tick, the raw pose is itself lerped from the old
-      // state to the corrected one. Ramp the compensating inverse by the same
-      // alpha: zero at prev, the full inverse at current. Later ticks apply the
-      // complete eased offset retained by advanceVisualOffset.
-      const correctionScale = state.tick === this.correctionSeedTick ? alpha : 1
-      localView.position.x += this.offset.current.x * correctionScale
-      localView.position.y += this.offset.current.y * correctionScale
-      localView.position.z += this.offset.current.z * correctionScale
+      const offsetX = this.offsetFrom.x + (this.offset.current.x - this.offsetFrom.x) * alpha
+      const offsetY = this.offsetFrom.y + (this.offset.current.y - this.offsetFrom.y) * alpha
+      const offsetZ = this.offsetFrom.z + (this.offset.current.z - this.offsetFrom.z) * alpha
+      const offsetHeading =
+        this.offsetHeadingFrom
+        + (this.offset.currentHeading - this.offsetHeadingFrom) * alpha
+      localView.position.x += offsetX
+      localView.position.y += offsetY
+      localView.position.z += offsetZ
       localView.heading = wrapAngle(
-        localView.heading + this.offset.currentHeading * correctionScale,
+        localView.heading + offsetHeading,
       )
     }
 

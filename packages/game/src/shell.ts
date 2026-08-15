@@ -187,7 +187,8 @@ function countFilled(order: readonly number[]): number {
 
 /** requestAnimationFrame loop, in this exact order:
  *    inputSource.drain -> advanceAccumulator -> N x (adapter.sample +
- *    session.tickOnce) -> updateCamera(N ticks) -> viewBuilder.build(alpha) ->
+ *    session.tickOnce), with viewBuilder.build(1) after every non-final catch-up
+ *    tick -> updateCamera(N ticks) -> the final viewBuilder.build(alpha) ->
  *    buildRenderFrame -> renderer.applyFrame -> buildHudModel -> DOM ->
  *    buildAudioModel -> audio.apply -> session.swapViews.
  *
@@ -586,6 +587,13 @@ export function startShell(opts: ShellOptions): GameShell {
     for (let i = 0; i < ticks; i++) {
       adapter.sample(rawInputs, r.session.state().tick + 1, intent)
       r.session.tickOnce(intent)
+      if (i < ticks - 1) {
+        // ClientLoop's correction delta describes only its most recent tick.
+        // Let ViewBuilder consume every intermediate correction at that tick's
+        // endpoint; do not swap the rendered views or emit audio until the
+        // final alpha build below.
+        r.builder.build(1, r.session.currentView())
+      }
     }
 
     const alpha = accumulatorAlpha(acc)

@@ -88,12 +88,15 @@ export function easeRemaining(t01: number): number {
  * (previous offset, correction delta, ticks elapsed) -> new offset. `out` MAY
  * alias `prev`, and in the shipped call it always does.
  *
- * `correctionHeading` is passed through UNCHANGED from `correctionDeltaOf` via
- * `RaceSession.correctionDelta` (§5.10): `null` means no reconciliation happened
- * this tick, and `0` means one happened and moved the heading by exactly zero.
- * Those are different, and the difference is carried from its source rather than
- * reconstructed here -- which is why there is no separate `corrected` flag.
- * `correctionPos` is ignored when `correctionHeading` is null.
+ * `RaceSession.correctionDelta` preserves net's post-reconcile-minus-pre delta.
+ * ViewBuilder negates its position and heading at the boundary before calling
+ * this function, because the visual offset is ADDED to the corrected pose and
+ * therefore needs old-visual-minus-new-state. `null` still means no
+ * reconciliation happened this tick, while `0` means one happened and moved
+ * the heading by exactly zero. Those are different, and the distinction is
+ * carried from its source rather than reconstructed here -- which is why there
+ * is no separate `corrected` flag. `correctionPos` is ignored when
+ * `correctionHeading` is null.
  *
  * Deterministic and frame-rate independent: `ticksElapsed` is SIM TICKS, never
  * frames. Called once per tick per smoothed seat, from ViewBuilder (§5.11).

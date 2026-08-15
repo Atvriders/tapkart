@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { Intent } from '@tapkart/sim'
-import { COUNTDOWN_TICKS, RACE_LAPS, TICK_DT } from '@tapkart/sim'
+import { COUNTDOWN_TICKS, RACE_LAPS, TICK_DT, wrapAngle } from '@tapkart/sim'
 import {
   ERROR_SMOOTH_WINDOW_TICKS,
   buildAudioModel,
@@ -13,6 +15,11 @@ import { createSoloTransport } from '../src/localinput'
 import { createSession } from '../src/session'
 import { createViewBuilder } from '../src/view'
 import { makeCorrectingGuest, makeGameContext } from './fixtures/game-fixtures'
+
+const SHELL_SOURCE = readFileSync(
+  fileURLToPath(new URL('../src/shell.ts', import.meta.url)),
+  'utf8',
+)
 
 const ONE_SHOTS = new Set([
   'lapCross',
@@ -79,6 +86,113 @@ describe("the frame loop's two views (§5.10, §5.13)", () => {
 })
 
 describe('error smoothing, end to end (§8.1, R41)', () => {
+  it('retains a correction from the first tick of one catch-up frame', () => {
+    const pair = makeCorrectingGuest(180)
+    const guest = pair.guest
+    const localId = guest.localPlayerId
+    const builder = createViewBuilder(guest)
+    const hostIntent: Intent = {
+      tick: 0,
+      steer: 0.1,
+      accel: 1,
+      brake: false,
+      drift: false,
+      useItem: false,
+    }
+    const guestIntent: Intent = {
+      tick: 0,
+      steer: 0,
+      accel: 1,
+      brake: false,
+      drift: false,
+      useItem: false,
+    }
+
+    let found = false
+    for (let tick = 181; tick <= 600; tick++) {
+      guestIntent.steer = Math.sin(tick / 12)
+      pair.host.tickOnce(hostIntent)
+      const before = guest.corrections()
+      guest.tickOnce(guestIntent)
+
+      if (guest.corrections() === before) {
+        builder.build(0, guest.currentView())
+        guest.swapViews()
+        pair.pump(renderNowMs(tick, 0))
+        continue
+      }
+
+      const deltaPos = { x: 0, y: 0, z: 0 }
+      const deltaHeading = guest.correctionDelta(deltaPos)
+      expect(deltaHeading).not.toBeNull()
+      expect(
+        Math.hypot(deltaPos.x, deltaPos.y, deltaPos.z) + Math.abs(deltaHeading ?? 0),
+      ).toBeGreaterThan(1e-6)
+
+      // This is the first of two sim ticks emitted by one render frame. It must
+      // advance the ViewBuilder at the current-tick endpoint, but must not swap
+      // the rendered views or consume audio.
+      const intermediate = guest.currentView()
+      builder.build(1, intermediate)
+      const correctedKart = guest.state().karts[localId]
+      const intermediateOffset =
+        Math.hypot(
+          intermediate.karts[localId].position.x - correctedKart.position.x,
+          intermediate.karts[localId].position.y - correctedKart.position.y,
+          intermediate.karts[localId].position.z - correctedKart.position.z,
+        )
+        + Math.abs(wrapAngle(intermediate.karts[localId].heading - correctedKart.heading))
+      expect(intermediateOffset).toBeGreaterThan(1e-6)
+
+      // No pump means no new snapshot can reconcile on the later catch-up tick.
+      // ClientLoop clears correctionDelta here, which was the production bug:
+      // waiting until after this tick to build loses the first tick's delta.
+      pair.host.tickOnce(hostIntent)
+      guestIntent.steer = Math.sin((tick + 1) / 12)
+      guest.tickOnce(guestIntent)
+      expect(guest.corrections()).toBe(before + 1)
+      expect(guest.correctionDelta(deltaPos)).toBeNull()
+
+      const alpha = 0.5
+      const previous = guest.prevState().karts[localId]
+      const current = guest.state().karts[localId]
+      const rawX = previous.position.x + (current.position.x - previous.position.x) * alpha
+      const rawY = previous.position.y + (current.position.y - previous.position.y) * alpha
+      const rawZ = previous.position.z + (current.position.z - previous.position.z) * alpha
+      const rawHeading = wrapAngle(
+        previous.heading + wrapAngle(current.heading - previous.heading) * alpha,
+      )
+
+      const view = guest.currentView()
+      builder.build(alpha, view)
+      const retained =
+        Math.hypot(
+          view.karts[localId].position.x - rawX,
+          view.karts[localId].position.y - rawY,
+          view.karts[localId].position.z - rawZ,
+        ) + Math.abs(wrapAngle(view.karts[localId].heading - rawHeading))
+      expect(retained).toBeGreaterThan(1e-6)
+      found = true
+      break
+    }
+
+    expect(found).toBe(true)
+
+    // shell.ts is a DOM adapter and stays unimported in node CI. Read its loop
+    // to bind the real correction proof above to the production catch-up path.
+    const loopStart = SHELL_SOURCE.indexOf('for (let i = 0; i < ticks; i++)')
+    const loopEnd = SHELL_SOURCE.indexOf('const alpha = accumulatorAlpha(acc)', loopStart)
+    expect(loopStart).toBeGreaterThan(-1)
+    expect(loopEnd).toBeGreaterThan(loopStart)
+    const catchUpLoop = SHELL_SOURCE.slice(loopStart, loopEnd)
+    expect(catchUpLoop).toContain('if (i < ticks - 1)')
+    expect(catchUpLoop).toContain('r.builder.build(1, r.session.currentView())')
+    expect(catchUpLoop).not.toMatch(/audio\.apply|swapViews/)
+
+    pair.host.close()
+    guest.close()
+  })
+
   it('eases a real correction to zero instead of snapping', () => {
     const pair = makeCorrectingGuest(180)
     const guest = pair.guest
