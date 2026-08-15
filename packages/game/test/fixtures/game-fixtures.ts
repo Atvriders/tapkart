@@ -6,6 +6,9 @@ import type { ControlInputs } from '../../src/controls/types'
 import { createControlInputs } from '../../src/controls/types'
 import type { Settings } from '../../src/settings'
 import { DEFAULT_SETTINGS } from '../../src/settings'
+import { CHARACTERS } from '@tapkart/content'
+import { MAX_KARTS } from '@tapkart/sim'
+import type { LobbySlot } from '../../src/app'
 
 /** A fully-allocated ControlInputs with a landscape viewport, no pointers down,
  *  no keys down and no tilt. `overrides` replaces whole fields, not deep merges. */
@@ -29,4 +32,22 @@ export function makeSettingsFixture(overrides?: Partial<Settings>): Settings {
     tiltCalibration: { ...DEFAULT_SETTINGS.tiltCalibration },
     ...overrides,
   }
+}
+
+/** MAX_KARTS filled slots. Seats in humanIds are connected humans; every other
+ * seat is a bot. */
+export function makeLobbySlots(humanIds: readonly number[] = [0]): LobbySlot[] {
+  const slots: LobbySlot[] = []
+  for (let i = 0; i < MAX_KARTS; i++) {
+    const human = humanIds.includes(i)
+    slots.push({
+      playerId: i,
+      name: human ? 'Player ' + i : 'Bot ' + i,
+      characterIdx: i % CHARACTERS.length,
+      isBot: !human,
+      connected: true,
+      ready: true,
+    })
+  }
+  return slots
 }
