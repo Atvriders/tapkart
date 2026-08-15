@@ -25,6 +25,18 @@
 **Builds on:** Plan 1 (`@tapkart/sim`, merged at `1f1f2c4`, 19 modules, 477 tests), Plan 2 (`@tapkart/protocol` + `@tapkart/net`, worktree `plan2-net` at `40ba73b` plus uncommitted Task 15b, finishing), Plan 3 (`@tapkart/content` + `@tapkart/render` + `@tapkart/game` + `apps/web`, contract locked, not executed).
 **Scope:** `packages/server`, plus `WebRtcTransport` and `WebSocketTransport` in `packages/net`, plus the six `MessageKind`s and two new `WIRE_TAG`s `packages/protocol` does not yet encode. Plan 4 of 5.
 
+> **Transport implementation corrections (2026-08-15, supersede later literal
+> snippets):** signal limits are measured with `TextEncoder` in UTF-8 bytes,
+> including malformed-surrogate input, never by JavaScript string length.
+> `WebRtcTransport` owns one global pre-open FIFO and flushes it only after both
+> data channels are open, preserving cross-channel send order; duplicate
+> offer/answer messages after a stable negotiation are no-ops rather than real
+> `setRemoteDescription` calls. A removed `FanOutTransport` part is silent (the
+> caller already owns peer-loss policy), removal after close is silent, and
+> adding a part after close throws. The shared transport-conformance suite and
+> browser-only WebSocket/WebRTC factories are owned by Task 11c; browser
+> adapters are package subpath exports and never enter the DOM-free net barrel.
+
 Every signature in §2 was read out of real source in
 `.claude/worktrees/plan2-net/packages/*/src/` on 2026-08-14 — **including the
 uncommitted working tree**, which is where Task 15b lives — and is quoted, not

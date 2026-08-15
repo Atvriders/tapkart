@@ -18,6 +18,21 @@
 **Builds on:** Plan 1 (`@tapkart/sim`, merged at `1f1f2c4`, 19 modules, 477 tests) and Plan 2 (`@tapkart/protocol` + `@tapkart/net`, merged to master `ff87a46` on 2026-08-15).
 **Scope:** `packages/render`, `packages/game`, and `apps/web` (shell only — Q11). Plan 3 of 5.
 
+> **Implementation correction (2026-08-15, supersedes later smoothing and frame-loop
+> literals):** `correctionDeltaOf` and `RaceSession.correctionDelta` report
+> **post-reconciliation minus pre-reconciliation**. `ViewBuilder` negates both
+> components before seeding `VisualOffset`, because that offset is added to the
+> corrected pose; passing the net delta through would double the visible jump.
+> A frame interpolates the visual offset from its previous endpoint to its new
+> endpoint with the same `alpha` used for the pose. In particular, `alpha = 0`
+> retains an older residual when a second correction lands, while `alpha = 1`
+> carries the newly seeded inverse in full. During a multi-tick catch-up frame,
+> the shell calls `ViewBuilder.build(1, currentView)` after every non-final tick
+> so the one-tick correction latch is consumed before the next tick resets it;
+> only the final build produces camera/HUD/audio/render output. These rules are
+> pinned by deterministic overlap and real two-tick catch-up regressions in the
+> shipped implementation (`2c5598c`).
+
 Every signature in §2 was read out of real source in
 `packages/*/src/` on 2026-08-14, in the worktree Plan 2 was built in; re-verified against master after Plan 2 merged (`ff87a46`, 2026-08-15) and is quoted, not
 reconstructed. Where a name Plan 3 needs does not exist in that source yet, §2.5

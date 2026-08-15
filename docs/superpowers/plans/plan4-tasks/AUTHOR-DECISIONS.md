@@ -21,9 +21,11 @@ silent, and what the assembler must resolve.
    against the per-task wiring in Tasks 2 and 7-11b. Reduce Task 15's barrel step to *verify and
    add only what is missing*; its own "each line appears exactly once" assertion is what catches a
    double-add.
-5. **`transport-conformance.ts` (§9.2) had NO OWNER** even though four tasks are meant to run it.
-   Task 18 now creates it in `packages/net/test/fixtures/` and runs `RoomTransport` through it.
-   **Wiring it to the other four implementations is still unassigned.**
+5. **`transport-conformance.ts` (§9.2) is owned by Task 11c.** It creates the
+   shared suite and invokes it for Loopback, LocalInput, WebSocket and WebRTC;
+   Task 18 later invokes that same suite for `RoomTransport`. Task 11c also owns
+   the two browser-only factories and their package subpath exports, which are
+   deliberately absent from the DOM-free net barrel.
 6. **Barrel wiring is per-task, deliberately.** Task 18's shipped `barrel.test.ts` fails the moment
    a file exists in `src/` without an `export *` line, so deferring barrel edits leaves `npm test`
    red across the whole middle of the plan.

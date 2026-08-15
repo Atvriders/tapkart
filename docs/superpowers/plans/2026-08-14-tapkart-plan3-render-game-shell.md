@@ -12,6 +12,14 @@
 
 **Contract:** `docs/superpowers/plans/2026-08-14-tapkart-plan3-contract.md` — **160 exported symbols, locked.** Every signature, constant, units convention and sole-writer rule is pinned there. Where this plan and the contract disagree, the contract wins; where the contract and the spec disagree, the spec wins.
 
+> **Execution erratum (2026-08-15):** later literal snippets that pass a net
+> correction straight into the render smoother, scale the whole retained offset
+> by frame `alpha`, or build the view only after all catch-up ticks are stale.
+> The contract's implementation-correction block is authoritative: invert the
+> post-minus-pre correction at the `ViewBuilder` boundary, interpolate old and
+> new offset endpoints, and consume every non-final catch-up tick with
+> `builder.build(1, currentView)` without rendering, audio, or a view swap.
+
 *Amended 2026-08-15: this line previously read "3,397 lines, 168 exported
 symbols." The exported-symbol count is fixed at 160 — the contract's own §11
 amendment (2026-08-14, ruling F-P4-7) already settled this; this line just
