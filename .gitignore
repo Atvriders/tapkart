@@ -2,3 +2,10 @@ node_modules/
 dist/
 .env
 *.local
+
+# SDD scratch: per-task reports and ledgers. They quote absolute host paths and
+# are working notes, not shipped content. The plan artifacts that matter live in
+# docs/superpowers/.
+content/plan1-task-reports/
+content/plan1-sdd-ledger.md
+content/final-fix-wave-report.md

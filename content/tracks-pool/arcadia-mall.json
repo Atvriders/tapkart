@@ -1,0 +1,791 @@
+{
+  "id": "arcadia-mall",
+  "name": "Arcadia Mall",
+  "controlPoints": [
+    {
+      "position": {
+        "x": 206.679,
+        "y": 0,
+        "z": 30
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 195.628,
+        "y": 0,
+        "z": 49.141
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 184.577,
+        "y": 0,
+        "z": 68.283
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 173.526,
+        "y": 0,
+        "z": 87.424
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 162.474,
+        "y": 0,
+        "z": 106.566
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 151.423,
+        "y": 0,
+        "z": 125.707
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 140.372,
+        "y": 0,
+        "z": 144.848
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 129.321,
+        "y": 0,
+        "z": 163.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 115.926,
+        "y": 0,
+        "z": 179.952
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 97.88,
+        "y": 0,
+        "z": 190.371
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 77.359,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 55.256,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 33.154,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 11.051,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -11.051,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -33.154,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -55.256,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -77.359,
+        "y": 0,
+        "z": 193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -97.88,
+        "y": 0,
+        "z": 190.371
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -115.926,
+        "y": 0,
+        "z": 179.952
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -129.321,
+        "y": 0,
+        "z": 163.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -140.372,
+        "y": 0,
+        "z": 144.848
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -151.423,
+        "y": 0,
+        "z": 125.707
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -162.474,
+        "y": 0,
+        "z": 106.566
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -173.526,
+        "y": 0,
+        "z": 87.424
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -184.577,
+        "y": 0,
+        "z": 68.283
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -195.628,
+        "y": 0,
+        "z": 49.141
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -206.679,
+        "y": 0,
+        "z": 30
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -213.806,
+        "y": 0,
+        "z": 10.419
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -213.806,
+        "y": 0,
+        "z": -10.419
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -206.679,
+        "y": 0,
+        "z": -30
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -195.628,
+        "y": 0,
+        "z": -49.141
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -184.577,
+        "y": 0,
+        "z": -68.283
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -173.526,
+        "y": 0,
+        "z": -87.424
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -162.474,
+        "y": 0,
+        "z": -106.566
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -151.423,
+        "y": 0,
+        "z": -125.707
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -140.372,
+        "y": 0,
+        "z": -144.848
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -129.321,
+        "y": 0,
+        "z": -163.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -115.926,
+        "y": 0,
+        "z": -179.952
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -97.88,
+        "y": 0,
+        "z": -190.371
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -77.359,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -55.256,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -33.154,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": -11.051,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 11.051,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 33.154,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 55.256,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 77.359,
+        "y": 0,
+        "z": -193.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 97.88,
+        "y": 0,
+        "z": -190.371
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 115.926,
+        "y": 0,
+        "z": -179.952
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 129.321,
+        "y": 0,
+        "z": -163.99
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 140.372,
+        "y": 0,
+        "z": -144.848
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 151.423,
+        "y": 0,
+        "z": -125.707
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 162.474,
+        "y": 0,
+        "z": -106.566
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 173.526,
+        "y": 0,
+        "z": -87.424
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 184.577,
+        "y": 0,
+        "z": -68.283
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 195.628,
+        "y": 0,
+        "z": -49.141
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 206.679,
+        "y": 0,
+        "z": -30
+      },
+      "width": 20,
+      "banking": 0,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 213.806,
+        "y": 0,
+        "z": -10.419
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    },
+    {
+      "position": {
+        "x": 213.806,
+        "y": 0,
+        "z": 10.419
+      },
+      "width": 20,
+      "banking": 0.04,
+      "surface": "tarmac"
+    }
+  ],
+  "checkpointS": [
+    0.023017,
+    0.092068,
+    0.180299,
+    0.237842,
+    0.283876,
+    0.34909,
+    0.39896,
+    0.444994,
+    0.514045,
+    0.575423,
+    0.613785,
+    0.682836,
+    0.736542,
+    0.774904,
+    0.847791,
+    0.943694
+  ],
+  "itemBoxes": [
+    {
+      "s": 0.061379,
+      "lateral": -6
+    },
+    {
+      "s": 0.061379,
+      "lateral": -2
+    },
+    {
+      "s": 0.061379,
+      "lateral": 2
+    },
+    {
+      "s": 0.061379,
+      "lateral": 6
+    },
+    {
+      "s": 0.184136,
+      "lateral": -6
+    },
+    {
+      "s": 0.184136,
+      "lateral": -2
+    },
+    {
+      "s": 0.184136,
+      "lateral": 2
+    },
+    {
+      "s": 0.184136,
+      "lateral": 6
+    },
+    {
+      "s": 0.39896,
+      "lateral": -6
+    },
+    {
+      "s": 0.39896,
+      "lateral": -2
+    },
+    {
+      "s": 0.39896,
+      "lateral": 2
+    },
+    {
+      "s": 0.39896,
+      "lateral": 6
+    },
+    {
+      "s": 0.537062,
+      "lateral": -6
+    },
+    {
+      "s": 0.537062,
+      "lateral": -2
+    },
+    {
+      "s": 0.537062,
+      "lateral": 2
+    },
+    {
+      "s": 0.537062,
+      "lateral": 6
+    },
+    {
+      "s": 0.690508,
+      "lateral": -6
+    },
+    {
+      "s": 0.690508,
+      "lateral": -2
+    },
+    {
+      "s": 0.690508,
+      "lateral": 2
+    },
+    {
+      "s": 0.690508,
+      "lateral": 6
+    },
+    {
+      "s": 0.859299,
+      "lateral": -6
+    },
+    {
+      "s": 0.859299,
+      "lateral": -2
+    },
+    {
+      "s": 0.859299,
+      "lateral": 2
+    },
+    {
+      "s": 0.859299,
+      "lateral": 6
+    }
+  ],
+  "ramps": [],
+  "boostPads": [
+    {
+      "s": 0.176463,
+      "lateral": 0,
+      "halfWidth": 3
+    },
+    {
+      "s": 0.345254,
+      "lateral": 0,
+      "halfWidth": 3
+    },
+    {
+      "s": 0.514045,
+      "lateral": 0,
+      "halfWidth": 3
+    },
+    {
+      "s": 0.682836,
+      "lateral": 0,
+      "halfWidth": 3
+    }
+  ],
+  "startPositions": [
+    {
+      "s": 0.993862,
+      "lateral": -5
+    },
+    {
+      "s": 0.993862,
+      "lateral": 5
+    },
+    {
+      "s": 0.987724,
+      "lateral": -5
+    },
+    {
+      "s": 0.987724,
+      "lateral": 5
+    },
+    {
+      "s": 0.981586,
+      "lateral": -5
+    },
+    {
+      "s": 0.981586,
+      "lateral": 5
+    },
+    {
+      "s": 0.975449,
+      "lateral": -5
+    },
+    {
+      "s": 0.975449,
+      "lateral": 5
+    }
+  ],
+  "bounds": {
+    "min": {
+      "x": -274,
+      "y": -30,
+      "z": -254
+    },
+    "max": {
+      "x": 274,
+      "y": 30,
+      "z": 254
+    }
+  }
+}
