@@ -1,5 +1,13 @@
 ### Task 15: the pure PWA layer — the caching policy, and the update and install reducers
 
+> **Execution corrections (2026-08-15):** `policy.test.ts` contains 23 tests,
+> not 20. `pathOf` must accept `://` only when its colon is the URL's first
+> colon; otherwise `blob:https://...` is misread as an ordinary absolute URL and
+> leaks the nested path. Pin `blob:` and `data:` to `/`/`networkFirst` in the
+> routing tests, not merely to “does not throw.” Downstream Task 18 must retain
+> the waiting worker registration and re-offer after `raceEnded`, and must use
+> `BeforeInstallPromptEvent.userChoice` to persist a real dismissal.
+
 **Files:**
 - Create: `apps/web/src/pwa/policy.ts` — contract §8.3, PURE
 - Create: `apps/web/src/pwa/update.ts` — contract §8.5, PURE

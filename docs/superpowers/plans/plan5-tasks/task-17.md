@@ -1,5 +1,14 @@
 ### Task 17: the Web Audio backend — the pure op planner, `ONE_SHOT_SPECS`, and the adapter behind Plan 3's seam
 
+> **Execution corrections (2026-08-15):** the supplied graph suite has 26 tests,
+> not 28. The adapter tracks every live transient, stops/disconnects them
+> idempotently on `close()`, and reuses one deterministic noise buffer for skid
+> and noise one-shots. `setConfig()` applies mute/master gain immediately rather
+> than waiting for a later race frame. Downstream Task 18 must apply one
+> preallocated silent `AudioModel` before dropping a race, and `setAudio()` must
+> close the outgoing backend, replace a mutable captured backend, and immediately
+> apply the persisted settings to the incoming one.
+
 **Files:**
 - Create: `packages/render/src/audio/graph.ts` — contract §9.2, PURE
 - Create: `packages/render/src/audio/web.ts` — contract §9.2, ADAPTER, **not** in the barrel
