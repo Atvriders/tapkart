@@ -12126,7 +12126,16 @@ published `package.json` has no `types`/`typings` field and no `types` condition
 in its `exports` map, and its `build/` directory contains no `.d.ts` files
 (checked against the registry tarball). §4.10 gives this task the decision and the
 duty to report it: **`"@types/three": "0.180.0"` goes in `packages/render`'s
-`devDependencies`**, and no other task touches it, so two tasks cannot disagree.
+`devDependencies`**.
+
+*Amended 2026-08-15: the scaffold task shipped it first.* A coordinator dispatch
+directed the scaffold task to add `@types/three` and its manifest assertion, so
+**expect to find both already present** — §4.10's "no other task touches this" no
+longer holds, and that was a controller error rather than a scaffold overreach.
+Treat Step 3b as **verify, not add**: if the pin and the assertion are already
+there, confirm they match the literal below and move on. A `git add` that stages
+nothing reads as a mistake to whoever runs it, and a step that cannot fail is
+this project's signature defect in its mildest form.
 
 **Files:**
 - Create: `packages/render/src/backend.ts`
@@ -12137,11 +12146,11 @@ duty to report it: **`"@types/three": "0.180.0"` goes in `packages/render`'s
   earlier task's line is lost. It is a `Modify` and not a `Create` on purpose: an
   implementer who reads `Create` reaches for `Write`, and gets the right answer
   here only because the list happens to be a superset.
-- Modify: `packages/render/package.json` — **replace the whole contents** with the
-  literal in Step 3b. Diffed against the scaffold task's literal the only change is
-  `+ "devDependencies": { "@types/three": "0.180.0" }`, alongside `dependencies.three`
-  pinned exactly and the `"./three"` export entry, both of which that task already
-  wrote. Stated as a whole-file replacement because that is what Step 3b does.
+- Modify: `packages/render/package.json` — **verify it matches** the literal in
+  Step 3b. Against the scaffold task's shipped file the expected difference is now
+  **none**: `devDependencies["@types/three"]`, `dependencies.three` pinned exactly
+  and the `"./three"` export entry were all written there (see the amendment
+  above). If it already matches, this file is untouched by this task.
 - Modify: `package-lock.json` — `npm install` side effect (Step 3b), declared
   because five tasks in this plan rewrite it
 - Test: `packages/render/test/backend.test.ts`
