@@ -8,3 +8,4 @@
 // types, mesh, descriptors, camera, frame, hud, audio, smoothing, backend.
 export * from './types'
 export * from './mesh'
+export * from './descriptors'
