@@ -532,8 +532,15 @@ Three facts about `WireKart` that decide Plan 3's design:
 
 Read from source. This is the whole public surface of `net` as it exists:
 
+**`ChannelName` comes from `@tapkart/protocol`, not from here.** *Amended 2026-08-15, after
+Plan 3 Task 1's gate check failed on it (TS2305) — the only symbol of the 45 that was filed under
+the wrong package.* `net/src/transport.ts` `import type`s it and deliberately never re-exports it,
+so a Plan 3 module importing `ChannelName` from `@tapkart/net` does not compile. It is the same
+type `Transport.send` takes — Task 1 pins that with a mutual-assignability check rather than
+trusting the name.
+
 ```ts
-// src/transport.ts
+// src/transport.ts — ChannelName is imported from @tapkart/protocol, not exported from net
 export interface Transport {
   send(channel: ChannelName, peerId: string, data: Uint8Array): void
   broadcast(channel: ChannelName, data: Uint8Array): void
