@@ -9,3 +9,4 @@
 export * from './types'
 export * from './mesh'
 export * from './descriptors'
+export * from './camera'
