@@ -116,14 +116,13 @@ const RFC1918 =
  *  fingerprint, and 95 characters exactly. */
 const COLON_HEX_32 = /(?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}/g
 
-/** §1 permits exactly one fingerprint in a repo file: 32 obviously-fake bytes.
- *  A hit is allowed only when EVERY byte is drawn from that placeholder's four
- *  values, which admits the rotation `applinks.test.ts` uses as its second
- *  format-valid placeholder and admits nothing a real keytool ever printed. */
-const FAKE_BYTES = new Set(['DE', 'AD', 'BE', 'EF'])
+/** §1 permits exactly one fingerprint value in a repo file. Tests that need a
+ * second value derive it at runtime, so no second 95-character literal exists. */
+const ALLOWED_FINGERPRINT =
+  'DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF'
 
 function isObviouslyFakeFingerprint(hit: string): boolean {
-  return hit.split(':').every((b) => FAKE_BYTES.has(b.toUpperCase()))
+  return hit === ALLOWED_FINGERPRINT
 }
 
 const KEYSTORE_EXTENSIONS = ['.jks', '.keystore', '.p12']

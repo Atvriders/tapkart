@@ -666,15 +666,15 @@ function drawQr(canvas: HTMLCanvasElement, text: string): void {
 }
 ```
 
-Call it where the lobby screen mounts, passing the element that already holds Plan 3's `room-code` node, and call the disposer when the screen changes away from `'lobby'`. **Do not move, rename or replace the `room-code` element** — it is one of the ten `data-testid` hooks Plan 4's E2E fixture depends on, and *"a testid that does not match is the same silent failure as a mismatched CSS selector"*.
+Call it where the lobby screen mounts, passing the element that already holds Plan 3's `room-code` node, and call the disposer when the screen changes away from `'lobby'`. **Do not move, rename or replace the `room-code` element** — it is one of the eleven cross-plan `data-testid` hooks, and *"a testid that does not match is the same silent failure as a mismatched CSS selector"*.
 
-**One eleventh hook, added here.** The title screen's solo control — the one that dispatches `{ kind: 'soloPressed' }` (Plan 3 §5.9) — gains `data-testid="solo-button"`, beside the existing `host-button` and `join-button`:
+**The eleventh hook already lands with Plan 3 and is verified here.** The title screen's solo control — the one that dispatches `{ kind: 'soloPressed' }` (Plan 3 §5.9) — already carries `data-testid="solo-button"`, beside `host-button` and `join-button`:
 
 ```ts
   soloButton.setAttribute('data-testid', 'solo-button')
 ```
 
-Plan 3 §5.13's table is ten names that *must not be renamed*; adding an eleventh is not a rename. It is needed because F-P5-26's offline spec (Task 20) drives a solo race with the network off, and solo is the only path that can run with no server — so without a hook on that button, **the one requirement that gates the build has no way to be checked at all.**
+Plan 3 §5.13's corrected table is eleven names that *must not be renamed*. Do not add a second attribute or reach into the shell's internal button from `apps/web`; assert the existing spelling. F-P5-26's offline spec (Task 20) drives a solo race with the network off, and solo is the only path that can run with no server — so without this hook, **the one requirement that gates the build has no way to be checked at all.**
 
 Finally, wire the guest side once, where the shell starts:
 

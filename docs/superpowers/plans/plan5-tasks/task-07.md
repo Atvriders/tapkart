@@ -89,9 +89,11 @@ const PLACEHOLDER =
 /** Contract §1, and §3 value 4: it must equal the Gradle applicationId. */
 const PACKAGE = 'io.github.atvriders.tapkart'
 
-/** A second format-valid placeholder, for the multi-fingerprint (debug build) case. */
-const PLACEHOLDER_2 =
-  'BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD'
+/** A second format-valid value for the multi-fingerprint case, assembled at
+ * runtime so the repository still contains exactly one 95-character
+ * fingerprint literal, as contract §1 requires. */
+const PLACEHOLDER_BYTES = PLACEHOLDER.split(':')
+const PLACEHOLDER_2 = [...PLACEHOLDER_BYTES.slice(2), ...PLACEHOLDER_BYTES.slice(0, 2)].join(':')
 
 describe('applinks constants', () => {
   it('spells the relation exactly as Google requires', () => {
