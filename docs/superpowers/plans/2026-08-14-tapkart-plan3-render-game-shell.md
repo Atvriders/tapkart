@@ -10,7 +10,14 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-tapkart-design.md`
 
-**Contract:** `docs/superpowers/plans/2026-08-14-tapkart-plan3-contract.md` — **3,397 lines, 168 exported symbols, locked.** Every signature, constant, units convention and sole-writer rule is pinned there. Where this plan and the contract disagree, the contract wins; where the contract and the spec disagree, the spec wins.
+**Contract:** `docs/superpowers/plans/2026-08-14-tapkart-plan3-contract.md` — **160 exported symbols, locked.** Every signature, constant, units convention and sole-writer rule is pinned there. Where this plan and the contract disagree, the contract wins; where the contract and the spec disagree, the spec wins.
+
+*Amended 2026-08-15: this line previously read "3,397 lines, 168 exported
+symbols." The exported-symbol count is fixed at 160 — the contract's own §11
+amendment (2026-08-14, ruling F-P4-7) already settled this; this line just
+hadn't caught up. The line count is dropped rather than corrected: the contract
+is a living document under active amendment and a count pinned in a second file
+goes stale on every edit to the first. Read the file if the count matters.*
 
 **Rulings:** `docs/superpowers/plans/2026-08-14-tapkart-plan3-rulings.md` — the 34 open questions the contract draft raised, ruled. Read a ruling when a task's reasoning is unclear; each says *why*, which the contract mostly does not.
 
@@ -31,11 +38,17 @@ Every task's requirements implicitly include this section.
 - **Scratch-object discipline:** no allocation in per-frame or per-tick paths. Caller-owned buffers, allocated once at construction.
 - **Never commit a real LAN IP, hostname, or host filesystem path.** Placeholders and RFC 5737 ranges only. This repository is public.
 
-## The Plan 2 gate
+## The Plan 2 surface
 
-Contract §2.5 lists what `@tapkart/net` must export before this plan's first import compiles: `withLocalInput`, `createNullTransport`, `LocalInputTransport`, `LOCAL_PEER_ID`, `correctionDeltaOf`, `TICK_MS`, `RemoteSample.kart`, `RemoteKeyframe.entities`, `sampleEntity`, `liveEntityIds`, `makeRemoteSample`, `makeRemoteEntitySample`, and `WireSnapshot.phase`. These are Plan 2 Tasks 15b and 15c. **Task 1 verifies the gate is open and stops if it is not** — building against a surface that does not exist yet is how a plan discovers at task 20 that task 3 was fiction.
+Contract §2.5 lists what `@tapkart/net` and `@tapkart/protocol` export. **Plan 2 merged to master
+on 2026-08-15 (`ff87a46`) and all of it shipped** — 845 tests, typecheck clean. Task 1 still
+verifies the surface before anything imports it, because a plan that discovers at task 20 that
+task 3 was fiction has wasted both.
 
-*Amended 2026-08-14 (ruling P2-R29): `RemoteInterpolator.sampleKart` and `sampleEntity` take a **caller-owned `out` buffer and return a boolean**; the two `make…Sample` factories above are how a caller allocates one, once, at construction. The allocating form returned two objects per call on a per-frame API — ~4,700 objects/s across seven remote karts and up to 32 entities — and `liveEntityIds` on the same class already took a caller-owned buffer for exactly that reason. Every task below that samples a remote kart or entity is written against the new form, and the gate checks the arity.*
+Note two things Plan 2 changed late, after this plan was authored: `sampleKart` and `sampleEntity`
+take a caller-owned `out` and return `boolean` (they allocated ~4,700 objects/s otherwise, on the
+API this plan's renderer is built on), and `RemoteSample.kart` is the **newest received keyframe**
+— roughly 100 ms *ahead* of the interpolated `position`/`heading` it travels with.
 
 ## What this plan does not build
 

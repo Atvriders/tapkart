@@ -15,11 +15,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-13-tapkart-design.md` (amended 2026-08-14). The spec is the binding authority; where this contract and the spec disagree, the spec wins and this contract is wrong.
 **Rulings:** `docs/superpowers/plans/2026-08-14-tapkart-plan3-rulings.md`. Binding over the draft, always.
-**Builds on:** Plan 1 (`@tapkart/sim`, merged at `1f1f2c4`, 19 modules, 477 tests) and Plan 2 (`@tapkart/protocol` + `@tapkart/net`, in the `plan2-net` worktree, finishing).
+**Builds on:** Plan 1 (`@tapkart/sim`, merged at `1f1f2c4`, 19 modules, 477 tests) and Plan 2 (`@tapkart/protocol` + `@tapkart/net`, merged to master `ff87a46` on 2026-08-15).
 **Scope:** `packages/render`, `packages/game`, and `apps/web` (shell only — Q11). Plan 3 of 5.
 
 Every signature in §2 was read out of real source in
-`.claude/worktrees/plan2-net/packages/*/src/` on 2026-08-14 and is quoted, not
+`packages/*/src/` on 2026-08-14, in the worktree Plan 2 was built in; re-verified against master after Plan 2 merged (`ff87a46`, 2026-08-15) and is quoted, not
 reconstructed. Where a name Plan 3 needs does not exist in that source yet, §2.5
 says so in those words and states the exact shape Plan 2 must ship.
 
@@ -567,8 +567,18 @@ export class ClientLoop {
 }
 ```
 
-`packages/net/src/index.ts` re-exports **four** modules today: `transport`,
-`loopback`, `apply`, `authority`. `client` is **not** in the barrel yet.
+`packages/net/src/index.ts` re-exports **nine** modules: `clock`, `transport`,
+`loopback`, `apply`, `authority`, `client`, `shadow`, `local`, `receive` — **35**
+runtime names in total (`transport` contributes none; `Transport` is an
+interface, erased at compile time). The set is pinned exactly, in both
+directions, by `packages/net/test/barrel.test.ts`.
+
+*Amended 2026-08-15: this used to read "four modules... `client` is not in the
+barrel yet," describing a mid-Plan-2 barrel that predated Tasks 15b, 15c, 16 and
+the final fix pass. Plan 2 is merged to master now; the barrel carries every
+module the package ships, and the count above is read off `src/index.ts` and
+`test/barrel.test.ts` directly rather than carried forward from an earlier
+draft.*
 
 Five behaviours of the shipped code that Plan 3 is built around, each verified
 in source rather than inferred:
@@ -632,22 +642,31 @@ from the surface this section calls "the whole public surface of `net`" is one a
 later reader assumes does not exist, and the next plan that needs it re-derives
 it in the wrong package. This section never enumerated `ShadowLoop`'s members, so
 there is no member list to extend — the note is the whole amendment. (§2.5's
-closing line, "`ShadowLoop` does not exist either, and Plan 3 never constructs
-one", is now half stale: it exists. The operative half — that Plan 3 never
-constructs one — still holds.)*
+closing line made the same "does not exist" claim about `ShadowLoop`; it is
+corrected to match, in the 2026-08-15 amendment there.)*
 
-### 2.5 The gate: what Plan 2 must ship before Plan 3's first import compiles
+### 2.5 What Plan 2 shipped — the `net` surface Plan 3 builds against, verified at merge
 
-**None of the following exists in `packages/net/src/` today.** Every item is
-required by a ruling, is Plan 2's work (P2-R8 … P2-R11), and is quoted here as
-the exact shape Plan 3 codes against. If Plan 2 ships a different shape, the fix
-is in Plan 2 — Plan 3 does not adapt, and no Plan 3 task may write into `net`.
+**Every item below shipped in Plan 2 and is quoted from the merged source, not
+the draft.** Each was required by a ruling (P2-R8 … P2-R11), and this is the
+exact shape Plan 3 codes against, read out of `packages/net/src/` on master the
+same way §2.4 was. No Plan 3 task may write into `net`.
+
+*Amended 2026-08-15: this section originally opened "None of the following
+exists in `packages/net/src/` today," framing every item below as a gate Plan 2
+had yet to clear before Plan 3's first import would compile, and closed by
+saying `ShadowLoop` did not exist either (§2.4 already half-corrected that
+closing line on 2026-08-14, when `ShadowLoop` itself shipped). Plan 2 has since
+merged to master. Every symbol below is now shipped, not pending, so the section
+is rewritten to say that — the per-symbol shapes are unchanged except where a
+correction below is marked.*
 
 ```ts
-// packages/net/src/client.ts — Plan 2 Task 15/15b
+// packages/net/src/clock.ts — Plan 2 Task 15c
 /** 1000 / TICK_HZ. Exported (Q6) so nothing else in the repository defines it. */
 export const TICK_MS: number
 
+// packages/net/src/client.ts — Plan 2 Task 15/15b
 export const REMOTE_INTERP_DELAY_MS = 100
 export const REMOTE_BUFFER_CAPACITY = 8
 export const REMOTE_EXTRAPOLATE_CAP_MS = 200
@@ -716,7 +735,7 @@ export function remoteInterpolatorOf(client: ClientLoop): RemoteInterpolator
  */
 export function correctionDeltaOf(client: ClientLoop, outPos: Vec3): number | null
 
-// packages/net/src/localinput.ts — Plan 2 Task 15b (R42)
+// packages/net/src/local.ts — Plan 2 Task 15b (R42)
 export const LOCAL_PEER_ID = 'local'
 
 export interface LocalInputTransport extends Transport {
@@ -741,9 +760,17 @@ export function withLocalInput(inner: Transport): LocalInputTransport
  *  immediately, onPeerLost never fires, close() is idempotent. */
 export function createNullTransport(): Transport
 
-// packages/net/src/index.ts — Task 18 widens the barrel to include `client`
-// and `localinput`.
+// packages/net/src/index.ts — the barrel; `client` and `local` are two of its
+// nine re-exported modules (§2.4).
 ```
+
+*Amended 2026-08-15: the two module comments above read `client.ts` (for
+`TICK_MS`) and `localinput.ts` (for the local-input surface). Shipped source has
+`TICK_MS` in `clock.ts` (Task 15c item F moved it there, per §2.4's own
+already-amended text) and the local-input surface in `local.ts`, not
+`localinput.ts` — that name belongs to `packages/game/src/localinput.ts` (§5.10a),
+a different file in a different package. The comments above are corrected to
+match; nothing about the shapes themselves changed.*
 
 **Why it carries heading too (R48).** `EPS.heading = 0.0025` rad is the threshold
 at which a heading correction *fires*, not the size of the correction that
@@ -799,15 +826,41 @@ puts on the race screen works for every role.
 Two properties of `RemoteSample`/`RemoteEntitySample` that Plan 3 depends on and
 that a Plan 2 implementation could get wrong without failing its own tests:
 
-- **`kart` / `entity` is the record from the *older* bracketing keyframe** (the
-  one at or before `targetMs`) whenever one exists, and the only available
-  keyframe otherwise. Discrete state must never lead the drawn position: a kart
-  whose interpolated position has not yet reached the line must not already read
-  `lap + 1`.
+- **`kart` / `entity` is the newest keyframe received for this seat, verbatim off
+  the wire** — never the older half of the interpolation bracket, and never
+  re-derived per branch. One definition, used whether `sampleKart` /
+  `sampleEntity` interpolated (`before` and `after` both present) or
+  extrapolated (only one — and during extrapolation there is no `after` half to
+  read from at all, so a bracket-relative definition cannot survive past the
+  first dropped snapshot). **The consequence a renderer must know:**
+  `position`/`heading` sample `targetMs = nowMs - REMOTE_INTERP_DELAY_MS`, ~100ms
+  *behind* `nowMs`, while `kart` is the newest record *received*, which lands
+  close to `nowMs` itself — so `kart` runs roughly 100ms *ahead* of the
+  `position`/`heading` returned alongside it. A renderer computing placement
+  from `kart.t` is mixing two instants. That is deliberate, and harmless for the
+  discrete HUD fields this sample exists to carry (§7.1) — but it must be
+  stated, not discovered.
 - **`kart` / `entity` is stable until it is evicted from the buffer.** Keyframes
   are deep copies (Plan 2 Task 15's `cloneWireKarts`), so a caller may read
   fields off the returned record after the next `push`. Plan 3 copies every field
   it needs during `ViewBuilder.build` anyway.
+
+*Amended 2026-08-15: the first bullet above previously read "`kart` / `entity`
+is the record from the older bracketing keyframe... Discrete state must never
+lead the drawn position: a kart whose interpolated position has not yet reached
+the line must not already read `lap + 1`." Shipped `sampleKart` / `sampleEntity`
+(`client.ts`) assign `out.kart = newest.karts[playerId]` unconditionally — the
+newest keyframe in the buffer, not the older bracket half — and the shipped doc
+comment on `RemoteSample.kart` says so explicitly: "NOT interpolated and NOT
+taken from the older half of the bracket." This was ruled deliberately, not an
+oversight: "the newest authoritative record" means the newest keyframe
+*received*, which stays well-defined in the extrapolation branch, where there is
+no `after` half at all — a bracket-relative reading would make `kart` mean a
+different thing depending on which branch ran, and would change meaning the
+moment a third keyframe landed. The corrected bullet also states the consequence
+the old text got backwards: `kart` runs ~100ms *ahead* of the interpolated
+render pose, not behind it, and a contract asserting the opposite of what a
+renderer will actually observe is worse than one that says nothing.*
 
 *Amended 2026-08-14 (ruling P2-R29, Plan 2's final fix pass): `sampleKart` and
 `sampleEntity` are quoted above in **out-parameter form**, taking a caller-owned
@@ -849,8 +902,8 @@ without them a caller has no legal way to make a buffer, since `RemoteSample.kar
 is non-optional and there is nothing neutral to put in it. §5.10, §5.11, §7.1 and
 §7.3 are amended to match; §11 counts them against Plan 2.*
 
-**`ShadowLoop` does not exist either, and Plan 3 never constructs one** — it is
-the server's, and the server is Plan 4.
+**`ShadowLoop` exists too — Plan 2's final fix pass shipped it (§2.4) — and Plan
+3 still never constructs one.** It is the server's, and the server is Plan 4.
 
 ### 2.6 Test fixtures are still not importable by bare specifier
 

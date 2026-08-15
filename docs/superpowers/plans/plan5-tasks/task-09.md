@@ -23,7 +23,9 @@ That failure is worse here than anywhere else in the plan, because **the only pe
 | Format information, generator polynomials, alignment centres, block layout, capacities | ISO/IEC 18004 tables | Task 8, `vectors/qr-reference.tsv` |
 | The version-1 function patterns and both copies of the ECC-M mask-2 format information | ISO/IEC 18004 Annex I's worked symbol | this task, `qr-symbol.txt` symbol `annexI` |
 | The 16 data codewords of a byte-mode ECC-M version-1 symbol | the ZX81 worked example | this task, cited in `qr-symbol.txt`'s header for symbol `pagedout` |
-| The complete module grid of two byte-mode ECC-M symbols | two independent implementations, one independent decoder | this task, `qr-symbol.txt` symbols `pagedout` and `invite` |
+| The complete module grid of three byte-mode ECC-M symbols, at versions 1, 3 and 10 | two independent implementations, one independent decoder | this task, `qr-symbol.txt` symbols `pagedout`, `invite` and `longest` |
+
+Version 10 is in that list on purpose. Versions 1 and 3 exercise neither of the two things that only exist higher up — the **version-information blocks** from version 7, and the **16-bit character count indicator** at version 10 — and a symbol set that stops at version 3 would let a transposed version-information block through CI and out to a phone. It is also the only one of the three with two block groups.
 
 **Interfaces:**
 
@@ -49,7 +51,7 @@ That failure is worse here than anywhere else in the plan, because **the only pe
 
   `TextEncoder` is an ES2022 global in Node ≥ 20 and every target browser, so this module needs no DOM lib and adds no dependency — which matters, because `packages/invite` is imported by `packages/server` through `@tapkart/invite` and ruling R35 keeps DOM out of that import closure.
 
-  The test additionally consumes, for §5.9's layer 3 only:
+  The test additionally reads **Task 8's vector file**, `packages/invite/vectors/qr-reference.tsv`, for its `BYTE_CAPACITY_M` rows — §5.9 layer 3 is explicit that *"The test reads the capacity from the transcribed table; it does not trust any capacity written in prose here"*, and that rules out calling `byteCapacityM` for the same purpose. It also consumes, for the same arithmetic:
 
   ```ts
   // @tapkart/protocol — Plan 4 owns these (C-1, C-7, F-P4-34)
@@ -85,7 +87,9 @@ That failure is worse here than anywhere else in the plan, because **the only pe
 **Two behaviours this task decides, because the contract does not and a reviewer would otherwise guess:**
 
 1. **`qrModuleAt` returns `false` outside the matrix rather than throwing.** The drawer adds `QR_QUIET_ZONE` modules of margin, so it loops over a region larger than the symbol; the quiet zone is light, which is exactly `false`. Throwing would force every caller to write the bounds check the accessor exists to own.
-2. **Penalty rule 4 uses the published "previous and next multiple of five" rule, exactly.** ISO/IEC 18004: take the percentage of dark modules, take the previous and next multiples of five, subtract 50 from each, take the absolute values, divide by five, take **the smaller**, multiply by 10. In integer arithmetic that is `10 * floor(10 * |2*dark − total| / total)`, which is exact at the boundaries where floating point is not. This is written out because a well-known third-party implementation (`node-qrcode` 1.5.4) uses `|ceil(pct/5) − 10|` instead, which over-penalises any symbol just **above** 50 % dark and therefore selects a different mask for some inputs — both symbols scan, but only one matches the published rule, and a reviewer comparing against that library would "fix" this in the wrong direction. The vectors in `qr-symbol.txt` are inputs where the rules agree, so the test is not sensitive to the argument; the code follows the standard.
+2. **Penalty rule 4 uses the published "previous and next multiple of five" rule, exactly**, and a penalty tie keeps the **lower** mask number. ISO/IEC 18004's rule 4: take the percentage of dark modules, take the previous and next multiples of five, subtract 50 from each, take the absolute values, divide by five, take **the smaller**, multiply by 10. In integer arithmetic that is `10 * floor(10 * |2*dark − total| / total)`, which is exact at the boundaries where floating point is not. This is spelled out because a well-known third-party implementation (`node-qrcode` 1.5.4) uses `|ceil(pct/5) − 10|` instead, which over-penalises any symbol just **above** 50 % dark and picks a different mask for some inputs, and a reviewer comparing against that library would "fix" this in the wrong direction.
+
+   **Be clear about what is and is not at stake in that paragraph.** The chosen mask is recorded in the symbol's own format information, so *every* mask produces a decodable symbol: rule 4 and the tie-break decide **which valid symbol is emitted, never whether it is valid.** No reference vector can pin them — pinning them would mean transcribing this encoder's own preference, which is the tautology F-P5-2 forbids. So they are written to the standard, and the vectors below happen to be inputs where the two formulations agree. If a future change makes a vector fail *only* by selecting a different mask, that is the one failure worth re-reading this note before "fixing".
 
 ---
 
@@ -149,6 +153,16 @@ Create `packages/invite/vectors/qr-symbol.txt` first — it is the test's input,
 #         to the same string by jsQR 1.4.0. It is here because a symbol at a
 #         second version, with a second character-count width and a real
 #         payload, is the one the product actually shows.
+#
+# longest The LONGEST invite URI this game can build: an origin of exactly
+#         MAX_INVITE_ORIGIN_BYTES bytes, LOBBY_PATH_PREFIX and a five-character
+#         room code — 208 bytes, which lands on version 10, the cap. It is here
+#         because versions 1 and 3 exercise neither of the two things that only
+#         appear higher up: the VERSION INFORMATION blocks (version 7 and above)
+#         and the 16-bit character count indicator (version 10). Version 10 is
+#         also the only one of these four with two block groups. Same
+#         provenance: node-qrcode 1.5.4 produced the grid and jsQR 1.4.0 read it
+#         back.
 #
 SYMBOL annexI 1 2 function -
 #######..#.##.#######
@@ -226,6 +240,65 @@ SYMBOL invite 3 6 full https://tapkart.example/r/ABCDE
 #.###.#..#..#######..#.##.###
 #.....#..#.#.##......#..###.#
 #######.#.#.#.##.#.####.##...
+END
+SYMBOL longest 10 1 full https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/r/ABCDE
+#######.#...#.##.#..##..#.#.#.#.#.#.#.#.#.#.####..#######
+#.....#..###..#..#.....#..#...#...#...#...#..#.#..#.....#
+#.###.#.#.##.###.#.#..######.###.###.###.###.###..#.###.#
+#.###.#.....#.##.#...#..##.#.#...#.#.#.#.#.#.#.#..#.###.#
+#.###.#..#....##..#.##..########..#.#.#.#.#.#..#..#.###.#
+#.....#.######...#..#..#.##...#...#...#...#...#...#.....#
+#######.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#######
+.........#..###.###.##...##...#.#...#...#...#............
+#.#...##.###.####..#####.######.#.#.#.#.#.#.#.##...#..#.#
+.#..#..##.#.#...#.##.#.#...#.#.#.#.#.#.#.#.#.#.#.#.#....#
+..##..#.#...##....##....#.####.###.###.###.###..##.##.#.#
+#####..###..####.##.#.#..#......#...#...#...#.......##.#.
+#####.#.####.##.#..##..###..#.#.#.#.#.#.#.#.#.##..#.##.##
+##...#.##.#.#..##.##...###.###.#.#.#.#.#.#.#.#.#.#.#....#
+..#####.##..#.##..##.###.#####.###.###.###.###..##.##.#.#
+######.###..###.###.##.###..#...#...#...#...#.......##...
+##.#..#.#.##..###..#####.##.#.#.#.#.#.#.#.#.#.##....##.##
+##.###.##.#.#####.#.#.##...#.#.#.#.#.#.#.#.#.#.#...#....#
+...##.#.##..#.#..###.##.#.####.###.###.###.###..#..##.#.#
+##..##..###.###...###.#..#..###.#...#...#...#......###.#.
+##.#.##.##.##.###.##...#.#..#...#.#.#.#.#.#.#.##..#.##.##
+##.#.#..#.#.#####..#####...#.#.#.#.#.#.#.#.#.#.#.#....#.#
+#..#.##.#.#...#..#.#.##.#.########.###.###.###...#.####.#
+.#..##.########..####.#..#..#..##...#...#...#..##...##.#.
+#..#.###.#....####.....#.#..#.#.#.#.#.#.#.#.#.##..#.#..##
+...#.#.#####.####.######...#.#.###.#.#.#.#.#.#.#.#.#....#
+##.######.####.....####.#######..#.###.###.###..#####.#.#
+#...#...####..#..###..#..##...#.#...#...#...#...#...##.#.
+#.###.#.##.#..#.#.#....#.##.#.#.#.#.#.#.#.#.#.###.#.##.##
+###.#...###..##..#.#####.##...##.#.#.#.#.#.#.#..#...#...#
+.########.#....#...###..#.########.###.###.###.######.#.#
+.#.##....#######.###..........#.#...#...#...#..##.#..#.#.
+#.....##.#.#......#..##.####.##.#.#.#.#.#.#.#.##.###.#.##
+##..#..#.##......#.####...##.#.#.#.#.#.#.#.#.#...#.#...#.
+.####.#.#....###...###..#...#.####.###.###.###.##.#.#.#..
+.##.#......##.#..###..#.......#.#...#...#...#..##.#..#...
+#.######.###.#..#.##.#.#.#.####.#.#.#.#.#.#.#.##.###.#.##
+####...#.#....##.#...###..##.#.#.#.#.#.#.#.#.#...#.#....#
+.##..##.#....##.#.#.....####..####.###.###.###.##.#.#.#.#
+.#..#.....###.###.#.###.......#.#...#...#...#..##.#..#.#.
+#.##..##.#...#..#..#.###.###.##.#.#.#.#.#.#.#.##.#.#.#.##
+#####..#.#.##.##.......#..##.#.#.#.#.#.#.#.#.#....##.#..#
+###.###.##...##.#.###...#...#.####.###.###.###.####.###.#
+#...#.......#.###..####.......#.#...#...#...#..#..#..#.#.
+..#####.##.###..#..#####.###.####.#.#.#.#.#.#.##.##....##
+..##.#.#.#....##..##...#..##.#.#.#.#.#.#.#.#.#.###.#....#
+#.#..###.#.####.#.#.#...#...#.####.###.###.###..#.###.#.#
+#####..##.....###..#.##.........#...#...#...#..##.##.#.#.
+......####....#.#..#####.######.#.#.#.#.#.#.#.########.##
+........##...#.##.##...#..#...##.#.#.#.#.#.#.#.##...#...#
+#######.##..###...#.###.#.#.#.####.###.###.###.##.#.#.#.#
+#.....#....##..##..#.#....#...#.#...#...#...#...#...##.#.
+#.###.#..#....#....######.#####.#.#.#.#.#.#.#.########.##
+#.###.#..#...##.#.##..###.#.#..#.#.#.#.#.#.#.#..#...#....
+#.###.#.#.#.#..#..#.#..#.##.#.####.###.###.###..#.#.#.###
+#.....#...####.#...#.#####.#.#..#...#...#...#..#.#.#.#...
+#######.#.#..###....####..####..#.#.#.#.#.#.#.####.###..#
 END
 ```
 
