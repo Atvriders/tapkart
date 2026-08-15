@@ -1,0 +1,23 @@
+{
+  "name": "@tapkart/game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./shell": "./src/shell.ts"
+  },
+  "dependencies": {
+    "@tapkart/sim": "*",
+    "@tapkart/protocol": "*",
+    "@tapkart/net": "*",
+    "@tapkart/content": "*",
+    "@tapkart/render": "*"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
