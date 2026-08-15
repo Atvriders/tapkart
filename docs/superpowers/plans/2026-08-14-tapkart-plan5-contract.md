@@ -19,6 +19,20 @@
 **Builds on:** Plan 1 (`@tapkart/sim`, merged `1f1f2c4`), Plan 2 (`@tapkart/protocol` + `@tapkart/net`), Plan 3 (`@tapkart/content`, `@tapkart/render`, `@tapkart/game`, `apps/web` shell — contract **locked**, 23 tasks authored), Plan 4 (`packages/server` — contract in authoring against the same rulings).
 **Scope:** `packages/invite`, `apps/android`, the PWA and Web Audio halves of `apps/web`, the Web Audio implementation behind Plan 3's `AudioBackend` seam, and all CI/CD and deploy. **Plan 5 of 5.**
 
+> **Android toolchain correction (verified 2026-08-15, supersedes later
+> generation/CI literals):** the selected Capacitor 8 line requires Node 22 or
+> newer, so the root engine and every workflow use Node 22+. Generate into a
+> temporary nested/staging Android path first, move the complete template into
+> the contract's flat `apps/android/` layout, set `android.path` to `.` only
+> after that move, and run `cap sync android` again so path-sensitive generated
+> files are rebuilt. Preserve the template's Cordova include, Google Services
+> classpath/conditional, coordinator-layout, splash-screen and Android test
+> dependencies during Kotlin-DSL conversion. `printTapkartPins` uses ordinary
+> Kotlin interpolation, `config.xml` is force-added despite the template ignore,
+> and `.kotlin/` is ignored. A clean-checkout Android CI job must build the web
+> app and run `cap sync android` before Gradle because the generated Cordova
+> module is intentionally ignored.
+
 Every Plan 3 signature quoted in §2 is quoted from the **locked** contract
 (`2026-08-14-tapkart-plan3-contract.md`) or from Plan 3's authored task files,
 not from the pre-ruling draft. Where the Plan 5 draft quoted the draft of Plan 3

@@ -1,5 +1,15 @@
 ### Task 13: the `apps/android` Capacitor scaffold, the version pins, and §1's two mechanical guards
 
+> **Verified execution erratum (2026-08-15):** Capacitor 8.5.0 rejects Node 20;
+> run this task under Node 22+. `cap add android` cannot target the already
+> existing package directory while `android.path` is `.`, so bootstrap with a
+> temporary nested/staging path, copy the complete generated tree (including
+> dotfiles) into `apps/android/`, change the committed config to
+> `android: { path: '.' }`, and run `cap sync android` again. Preserve every
+> generated dependency/include/plugin described in the Plan 5 contract's
+> correction block. The corrections below to Kotlin interpolation, ignored
+> files, and staging are authoritative over older literal prose in this task.
+
 **Files:**
 - Create: `apps/android/package.json`
 - Create: `apps/android/capacitor.config.ts`
@@ -282,8 +292,9 @@ const config: CapacitorConfig = {
   // pointed at a remote origin is useless without network.
   webDir: '../web/dist',
 
-  // P5 Q9: verified in step 3d, not assumed.
-  android: { path: '.' },
+  // Bootstrap only. After the generated tree is flattened into apps/android,
+  // change this to `android: { path: '.' }` and re-run `cap sync android`.
+  android: { path: 'android' },
 }
 
 export default config
@@ -299,18 +310,23 @@ node -e "const p=require('./apps/android/package.json');console.log('capacitor c
 
 Write down what that last line prints. It is row 1 of §6.6's table and Step 7 records it.
 
-**3d.** Build the web app, then generate the Android project, then **verify P5 Q9's branch**:
+**3d.** Build the web app, generate into the staging directory, flatten the
+complete generated tree, then re-sync against the final path:
 
 ```bash
 npm run build -w @tapkart/web
 npm --prefix apps/android exec cap add android
-ls apps/android/app/build.gradle apps/android/android/app/build.gradle 2>&1
+# Copy apps/android/android/ into apps/android/ with dotfiles preserved, remove
+# the now-empty staging directory, set android.path to '.', then:
+npm --prefix apps/android exec cap sync android
+test -f apps/android/app/build.gradle
+test ! -e apps/android/android/app/build.gradle
 ```
 
-- If `apps/android/app/build.gradle` exists → **the flat branch**, which is what §6.1's layout and Tasks 10–12's paths assume. Continue.
-- If instead `apps/android/android/app/build.gradle` exists → **the nested branch**. The pinned Capacitor major does not honour `android.path`. §6.1: *"otherwise fall back to Capacitor's nested layout (`apps/android/android/…`) and shift every path in §6, §5.8 and §12.2 by one directory."* Concretely, and this is the complete shift: `apps/android/app/**` becomes `apps/android/android/app/**`; `-p apps/android` becomes `-p apps/android/android` in every Gradle invocation in Tasks 10, 11, 12 and the CI workflow; and Task 10's `sourceSets["test"].resources.srcDir("$rootDir/../../packages/invite/vectors")` gains one more `../` because `rootDir` moved one level deeper. **Record the branch in §6.6's table in Step 7 either way** — a later reader must not have to re-derive which one happened.
-
-The rest of this task is written for the flat branch. If yours is nested, apply the shift above uniformly and change nothing else.
+The complete copy matters: retain wrapper files, dotfiles, resources, test
+sources and Capacitor/Cordova-generated files. Do not keep the first
+`capacitor.settings.gradle`; the final sync regenerates it with paths relative
+to the flat root. Record `flat (staged then re-synced)` in §6.6.
 
 **3e.** Replace the template's Java activity with the Kotlin one §6.1's layout names:
 
@@ -509,18 +525,20 @@ apply(from = "capacitor.build.gradle")
 // should be.
 tasks.register("printTapkartPins") {
     val values = listOf(
-        "applicationId=${'$'}{android.defaultConfig.applicationId}",
-        "namespace=${'$'}{android.namespace}",
-        "compileSdk=${'$'}{android.compileSdk}",
-        "minSdk=${'$'}{android.defaultConfig.minSdk}",
-        "targetSdk=${'$'}{android.defaultConfig.targetSdk}",
+        "applicationId=${android.defaultConfig.applicationId}",
+        "namespace=${android.namespace}",
+        "compileSdk=${android.compileSdk}",
+        "minSdk=${android.defaultConfig.minSdk}",
+        "targetSdk=${android.defaultConfig.targetSdk}",
         "android16ApiLevel=$android16ApiLevel",
     )
     doLast { values.forEach(::println) }
 }
 ```
 
-> The `${'$'}{…}` spellings above are the Kotlin escape for a literal `${…}` and are needed only because the surrounding `values` list is built at configuration time. If your editor renders them oddly, they are four ordinary interpolations reading `android.defaultConfig.applicationId`, `android.namespace`, `android.compileSdk`, `android.defaultConfig.minSdk` and `android.defaultConfig.targetSdk`.
+> These are ordinary Kotlin interpolations. Escaping the dollar sign would print
+> `${android...}` literally and make `assert-pins.sh` validate text instead of
+> the configured project.
 
 Then remove the three Groovy originals:
 
@@ -626,6 +644,7 @@ apps/android/local.properties
 apps/android/app/src/main/assets/public/
 apps/android/app/build/
 apps/android/.gradle/
+apps/android/.kotlin/
 apps/web/dist/
 apps/web/.vite/
 apps/web/public/icons/
@@ -679,5 +698,7 @@ Change nothing else in that file. It is locked; §6.6 is the one place it asks t
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/android .gitignore packages/invite/test/no-secrets.test.ts package-lock.json docs/superpowers/plans/2026-08-14-tapkart-plan5-contract.md && git commit -m "feat(android): Capacitor scaffold, version pins recorded by rule, and §1's secret guard"
+git add apps/android .gitignore packages/invite/test/no-secrets.test.ts package-lock.json docs/superpowers/plans/2026-08-14-tapkart-plan5-contract.md
+git add -f apps/android/app/src/main/res/xml/config.xml
+git commit -m "feat(android): Capacitor scaffold, version pins recorded by rule, and §1's secret guard"
 ```

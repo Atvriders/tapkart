@@ -1,5 +1,11 @@
 ### Task 20: CI and release — the five jobs, the container assertions, and the two Playwright specs
 
+> **Verified CI erratum (2026-08-15):** use Node 22+ in every job because the
+> pinned Capacitor 8 CLI rejects Node 20. The `android` job, like the release APK
+> job, must build `@tapkart/web` and run `cap sync android` after `npm ci` and
+> before any Gradle command; the ignored generated Cordova module does not exist
+> in a clean checkout until sync runs.
+
 **Files:**
 - Create: `.github/workflows/ci.yml` — contract §12.1
 - Create: `.github/workflows/release.yml` — contract §12.1
@@ -314,7 +320,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - run: npm ci
       # BOTH tsconfigs (§8.4). `dom` and `webworker` cannot coexist in one
@@ -339,7 +345,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       # JDK 21 (spec §9, P5 Q32).
       - uses: actions/setup-java@v4
@@ -349,6 +355,8 @@ jobs:
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci
+      - run: npm run build -w @tapkart/web
+      - run: npm --prefix apps/android exec cap sync android
 
       # C-1's freeze, mechanically: the committed generated file must still be
       # what the shipped LOBBY_PATH_PREFIX produces.
@@ -375,7 +383,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
@@ -401,7 +409,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - run: npm ci
       - uses: docker/setup-buildx-action@v3
@@ -496,7 +504,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - uses: actions/setup-java@v4
         with:
