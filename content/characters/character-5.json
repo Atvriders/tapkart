@@ -1,0 +1,25 @@
+{
+  "id": "fendrel-granite",
+  "name": "Fendrel Granite",
+  "bodyHeight": 1.2,
+  "bodyRadius": 0.48,
+  "headRadius": 0.28,
+  "palette": {
+    "primary": [
+      0.38,
+      0.1,
+      0.58
+    ],
+    "secondary": [
+      0.18,
+      0.05,
+      0.3
+    ],
+    "accent": [
+      0.85,
+      0.2,
+      0.95
+    ]
+  },
+  "silhouette": "wide"
+}

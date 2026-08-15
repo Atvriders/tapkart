@@ -1,0 +1,25 @@
+{
+  "id": "bram-axle",
+  "name": "Bram Axle",
+  "bodyHeight": 0.85,
+  "bodyRadius": 0.46,
+  "headRadius": 0.28,
+  "palette": {
+    "primary": [
+      0.85,
+      0.4,
+      0.06
+    ],
+    "secondary": [
+      0.18,
+      0.1,
+      0.04
+    ],
+    "accent": [
+      1,
+      0.8,
+      0.25
+    ]
+  },
+  "silhouette": "wide"
+}

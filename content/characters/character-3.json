@@ -1,0 +1,25 @@
+{
+  "id": "dana-voss",
+  "name": "Dana Voss",
+  "bodyHeight": 0.92,
+  "bodyRadius": 0.44,
+  "headRadius": 0.22,
+  "palette": {
+    "primary": [
+      0.05,
+      0.1,
+      0.5
+    ],
+    "secondary": [
+      0.12,
+      0.3,
+      0.68
+    ],
+    "accent": [
+      0.9,
+      0.35,
+      0.05
+    ]
+  },
+  "silhouette": "wide"
+}

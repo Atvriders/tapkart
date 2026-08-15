@@ -9,3 +9,6 @@ dist/
 content/plan1-task-reports/
 content/plan1-sdd-ledger.md
 content/final-fix-wave-report.md
+content/pipeline/content-bundle.mjs
+content/pipeline/records-out/
+content/pipeline/*.results.jsonl

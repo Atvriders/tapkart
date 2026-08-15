@@ -64,3 +64,29 @@ Each gate found something the previous one could not. That is the argument for t
 Whether a track is *fun*. That is human tuning, and the design spec is explicit that this
 output is first-draft geometry. All six currently pass all three gates: 82-117 s for three
 laps, zero respawns.
+
+## Descriptor and theme content
+
+The 8 character descriptors, 8 kart descriptors and 6 track themes are generated the same
+way the tracks were, with the same rule: **the gate is bundled from the real shipped code,
+never rewritten.**
+
+    npx esbuild content/pipeline/content-entry.ts --bundle --format=esm --platform=node \
+      --outfile=content/pipeline/content-bundle.mjs
+    deepseek-batch --jsonl content/pipeline/descriptors.jsonl --body-field brief --id-field id \
+                   --instruction @content/pipeline/descriptor-gen-instruction.md \
+                   --expect json --model deepseek-v4-pro --dry-run    # always dry-run first
+    deepseek-batch ...                                                # drop --dry-run
+    node content/pipeline/gate-descriptors.mjs                        # real parsers + roster rules
+
+`content-bundle.mjs` is `packages/content/src/descriptors.ts` and `theme.ts` bundled by
+esbuild, so a generated record is judged by the code the game runs. The gate adds the layer
+a per-record parser cannot: id uniqueness, slot-letter ordering, silhouette-vs-weight
+agreement, kart colour separation and edge-marker legibility — all of which need the whole
+roster at once. `packages/content/test/roster.test.ts` re-asserts every one of them against
+the committed files, so the invariants survive a hand edit.
+
+Keep `descriptor-gen-instruction.md` **byte-identical** across runs; per-record detail goes
+in the JSONL body. Balance is not generated: the eight stat rows come from `makeCharacters()`
+via `CHARACTERS`, and the briefs hand a slot's stats to the model as input so the appearance
+matches the handling.

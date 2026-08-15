@@ -1,0 +1,26 @@
+{
+  "id": "fortress",
+  "name": "Fortress",
+  "chassisLength": 2.6,
+  "chassisWidth": 1.6,
+  "chassisHeight": 0.8,
+  "wheelRadius": 0.45,
+  "wheelWidth": 0.35,
+  "palette": {
+    "body": [
+      0.55,
+      0.12,
+      0.85
+    ],
+    "trim": [
+      0.88,
+      0.75,
+      1
+    ],
+    "wheel": [
+      0.02,
+      0.02,
+      0.02
+    ]
+  }
+}

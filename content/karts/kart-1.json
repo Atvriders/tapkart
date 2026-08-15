@@ -1,0 +1,26 @@
+{
+  "id": "bison-slab",
+  "name": "Bison Slab",
+  "chassisLength": 2.55,
+  "chassisWidth": 1.35,
+  "chassisHeight": 0.42,
+  "wheelRadius": 0.38,
+  "wheelWidth": 0.3,
+  "palette": {
+    "body": [
+      0.95,
+      0.52,
+      0.04
+    ],
+    "trim": [
+      0.16,
+      0.08,
+      0.03
+    ],
+    "wheel": [
+      0.02,
+      0.02,
+      0.02
+    ]
+  }
+}

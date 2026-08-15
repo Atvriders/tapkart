@@ -1,0 +1,25 @@
+{
+  "id": "havoc-pulse",
+  "name": "Havoc Pulse",
+  "bodyHeight": 1.18,
+  "bodyRadius": 0.33,
+  "headRadius": 0.22,
+  "palette": {
+    "primary": [
+      0.65,
+      0.08,
+      0.55
+    ],
+    "secondary": [
+      0.28,
+      0.03,
+      0.23
+    ],
+    "accent": [
+      1,
+      0.2,
+      0.7
+    ]
+  },
+  "silhouette": "tall"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "ava-cruz",
+  "name": "Ava Cruz",
+  "bodyHeight": 1.08,
+  "bodyRadius": 0.34,
+  "headRadius": 0.22,
+  "palette": {
+    "primary": [
+      0.55,
+      0.03,
+      0.03
+    ],
+    "secondary": [
+      0.18,
+      0.02,
+      0.02
+    ],
+    "accent": [
+      0.9,
+      0.7,
+      0.1
+    ]
+  },
+  "silhouette": "tall"
+}
