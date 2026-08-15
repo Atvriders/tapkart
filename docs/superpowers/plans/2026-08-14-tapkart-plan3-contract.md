@@ -2780,6 +2780,13 @@ under `opts.root` (and, for one of them, on `opts.canvas`):
 | `race-canvas` | Race screen | the canvas `startShell` renders into |
 | `lap-counter` | Race screen | the HUD's lap text, e.g. `"2/3"` — matched against `/[1-3]\s*\/\s*3/` |
 | `results` | Results screen | present and visible once the race finishes |
+| `solo-button` | Title screen | dispatches `{ kind: 'soloPressed' }` |
+
+*`solo-button` added 2026-08-15, an eleventh, by Plan 5.* Its offline spec is a **build
+gate** (ruling F-P5-26: offline solo is a requirement, not a nice-to-have), and without a hook
+on the solo control that spec has nothing to drive — a gating test that cannot reach the thing
+it gates is the failure this project keeps finding. `soloPressed` is already an `AppEvent`
+(§5.9), so unlike ready and start this one is fully Plan 3's to wire.
 
 Three of them name behaviour Plan 3 does not own: `room-code-input` /
 `room-code-submit` reach a room that only Plan 4 mints, and `ready-button` /

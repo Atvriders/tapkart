@@ -21124,6 +21124,7 @@ staying broken across three. This task now *consumes* `buildResultRows`.
   | `start-button` | the `raceStarting` transition button |
   | `race-canvas` | `opts.canvas` itself |
   | `lap-counter` | `hudLap` |
+  | `solo-button` | `soloPressed` |
   | `results` | the results screen's panel |
 
   Two of them are hooks on behaviour Plan 3 does not own: `ready-button` has no
@@ -21400,6 +21401,7 @@ const TESTIDS = {
   raceCanvas: 'race-canvas',
   lapCounter: 'lap-counter',
   results: 'results',
+  soloButton: 'solo-button',
 } as const
 
 /** The three transition-table buttons Plan 4 drives by testid. Everything else
@@ -21408,6 +21410,7 @@ const TESTIDS = {
 const BUTTON_TESTIDS: Readonly<Record<string, string | undefined>> = {
   hostPressed: TESTIDS.hostButton,
   joinPressed: TESTIDS.joinButton,
+  soloPressed: TESTIDS.soloButton,
   raceStarting: TESTIDS.startButton,
 }
 
@@ -21900,7 +21903,7 @@ repository can currently detect, and the plan that CAN detect it does not run
 until Plan 5's CI job:
 
 ```bash
-for id in host-button join-button room-code-input room-code-submit room-code \
+for id in host-button join-button solo-button room-code-input room-code-submit room-code \
           ready-button start-button race-canvas lap-counter results; do
   grep -q "'$id'" packages/game/src/shell.ts || echo "MISSING data-testid: $id"
 done
