@@ -25,15 +25,16 @@ and what the operator must see.
   broken, and this repository has shipped twenty-one tests that could not detect
   what they existed to detect.
 - **`e2e/join-and-race.spec.ts` is spec §8's row**, written in full. It drives
-  two browser contexts through the real shell and **fails until Plan 3's shell
-  carries the ten `data-testid` hooks below.** That failure is honest and it is
-  the point: it is the E2E contract, stated in executable form, and the failure
-  message names the exact hook that is missing. It is **not** `test.skip`ped — a
-  skipped end-to-end is the vacuous version of the same file, and Plan 5's CI job
-  is what makes it blocking.
+  two browser contexts through the real shell and must be green when this task
+  lands. Plan 3 already carries the ten multiplayer `data-testid` hooks below
+  (plus Plan 5's `solo-button`); the browser multiplayer bridge is the remaining
+  prerequisite. It is never `test.skip`ped — a skipped end-to-end is the
+  vacuous version of the same file.
 
-**Execution order.** Task 23 must have landed: the lane's `webServer` runs
-`packages/server/dist/main.mjs`, which the esbuild bundle produces.
+**Execution order.** Task 23 and the browser multiplayer bridge must have landed:
+the lane's `webServer` runs `packages/server/dist/main.mjs`, which the esbuild
+bundle produces, and the shell must use the real host/join transports rather
+than its Plan 3 failure stubs.
 
 **Files:**
 - Create: `playwright.config.ts` (repo root)
@@ -71,7 +72,7 @@ construction, which is what keeps a browser out of `npm test` permanently.
 
 **Two decisions this task makes:**
 
-1. **The lane binds a FIXED loopback port, from `TAPKART_E2E_PORT`, default
+1. **The lane binds a FIXED loopback port, from harness-only `E2E_PORT`, default
    3132.** §10.4 asks for an ephemeral port; Playwright must know the URL
    *before* it starts the server and there is no channel by which an OS-assigned
    port could be communicated back to it. The security-relevant half — bound to
@@ -128,7 +129,7 @@ import { defineConfig, devices } from '@playwright/test'
  * server, and an OS-assigned port cannot be communicated back to it. The half
  * that matters -- bound to loopback and nothing else -- is preserved exactly.
  */
-const PORT = Number(process.env.TAPKART_E2E_PORT ?? '3132')
+const PORT = Number(process.env.E2E_PORT ?? '3132')
 const HOST = '127.0.0.1'
 const BASE_URL = 'http://' + HOST + ':' + String(PORT)
 
@@ -187,9 +188,8 @@ import { expect } from '@playwright/test'
  * these hooks exist here rather than as CSS selectors guessed inside a spec: a
  * class name is styling and moves, a `data-testid` is a contract and does not.
  *
- * Until the shell carries them, `join-and-race.spec.ts` fails at the first
- * locator and the failure message names the missing hook. That is the intended
- * state of this file on the day Plan 4 lands, and it is not skipped: a skipped
+ * The shell carries them. If one drifts, `join-and-race.spec.ts` fails at the
+ * first locator and names the missing hook. It is not skipped: a skipped
  * end-to-end asserts nothing while looking like it asserts everything.
  */
 export const HOOKS = {
@@ -335,10 +335,9 @@ import { HOOKS, hook, hostRoom, joinRoom } from './fixtures/tapkart'
  * rather than produce a second player, and only two contexts in one test let one
  * player read a code the other one minted.
  *
- * This spec fails until Plan 3's shell carries the ten hooks in
- * e2e/fixtures/tapkart.ts. That is the intended state on the day Plan 4 lands:
- * the contract is written in executable form, the failure names the missing
- * hook, and Plan 5 owns the CI job that makes it blocking. It is not skipped.
+ * This spec requires the ten multiplayer hooks in e2e/fixtures/tapkart.ts and
+ * the browser multiplayer bridge. The contract is executable, failures name
+ * the missing hook or behavior, and it is not skipped.
  */
 test('two contexts join by code and both finish the race', async ({ browser }) => {
   const hostContext = await browser.newContext()
@@ -421,7 +420,7 @@ and reports **5 passed**. The `webServer` block prints the server's own
 If port 3132 is in use on your machine:
 
 ```bash
-TAPKART_E2E_PORT=3999 npm run test:e2e -- e2e/lane.spec.ts
+E2E_PORT=3999 npm run test:e2e -- e2e/lane.spec.ts
 ```
 
 Then run the whole lane:
@@ -430,11 +429,8 @@ Then run the whole lane:
 npm run test:e2e
 ```
 
-Expected **today**: `lane.spec.ts` 5 passed; `join-and-race.spec.ts` 2 failed,
-each failure naming a `data-testid` the shell does not yet expose — for example
-`locator.click: Timeout ... waiting for getByTestId('host-button')`. **That is
-the correct result for this task**, and it is why the file is not skipped: the
-contract is visible, executable, and named in the failure.
+Expected: every lane and join-and-race test passes. Any failure here blocks the
+task; an expected-red full E2E lane is not a finished multiplayer game.
 
 Finally, prove the vitest lane is untouched:
 
@@ -464,13 +460,11 @@ no trailing-slash normalisation, asserted over real HTTP with maxRedirects:
 one property with no other symptom anywhere in the system.
 
 join-and-race.spec.ts is spec §8's row in full: two browser contexts, one
-hosts, one joins by typed code, both finish three laps. It fails until Plan
-3's shell carries the ten data-testid hooks in e2e/fixtures/tapkart.ts, and
-it is deliberately NOT skipped -- a skipped end-to-end asserts nothing while
-looking like it asserts everything, and this repository has shipped
-twenty-one tests that could not detect what they existed to detect.
+hosts, one joins by typed code, both finish three laps. It is green through
+the real browser multiplayer bridge and is deliberately NOT skipped -- a
+skipped end-to-end asserts nothing while looking like it asserts everything.
 
-The lane binds a fixed loopback port from TAPKART_E2E_PORT (default 3132)
+The lane binds a fixed loopback port from harness-only E2E_PORT (default 3132)
 rather than an ephemeral one: Playwright must know the URL before it starts
 the server, and an OS-assigned port cannot be communicated back to it."
 ```
