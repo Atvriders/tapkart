@@ -4,6 +4,8 @@
 // has; overwriting it deletes another task's fixtures.
 import type { ControlInputs } from '../../src/controls/types'
 import { createControlInputs } from '../../src/controls/types'
+import type { Settings } from '../../src/settings'
+import { DEFAULT_SETTINGS } from '../../src/settings'
 
 /** A fully-allocated ControlInputs with a landscape viewport, no pointers down,
  *  no keys down and no tilt. `overrides` replaces whole fields, not deep merges. */
@@ -18,4 +20,13 @@ export function makeControlInputsFixture(overrides?: Partial<ControlInputs>): Co
   if (overrides.tilt !== undefined) raw.tilt = overrides.tilt
   if (overrides.viewport !== undefined) raw.viewport = overrides.viewport
   return raw
+}
+
+/** DEFAULT_SETTINGS with a fresh, independently mutable tiltCalibration. */
+export function makeSettingsFixture(overrides?: Partial<Settings>): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    tiltCalibration: { ...DEFAULT_SETTINGS.tiltCalibration },
+    ...overrides,
+  }
 }
