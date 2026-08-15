@@ -7,8 +7,8 @@ silent, and what the assembler must resolve.
 
 ## Cross-task issues the assembler MUST resolve
 
-1. **Execution order is NOT numeric.** The server group runs
-   `18 -> 20 -> 22 steps 1-4 -> 19 -> 19b -> 21 -> 22 steps 5-6 -> 23 -> 24`, because `hub.ts`
+1. **Execution order is NOT numeric.** After the net tasks, the server group runs
+   `16 -> 18 -> 17 -> 22 steps 1-4 -> 20 -> 19 -> 19b -> 21 -> 22 steps 5-8 -> 23 -> browser multiplayer bridge -> 24`, because `hub.ts`
    imports `LogSink`, `RateLimiter`, `ContentProvider` and `startRace`, and the barrel needs all
    twelve modules. Task 22 says so at its top and commits once at the end.
 2. **`packages/net/src/socket.ts` is claimed by BOTH Task 2 and Task 7**, and both write
@@ -30,17 +30,17 @@ silent, and what the assembler must resolve.
 
 ## A cross-PLAN dependency Plan 3 does not know about
 
-**`join-and-race.spec.ts` declares TEN `data-testid` hooks as Plan 4's contract with Plan 3's
-shell, and it FAILS until the shell carries them** — deliberately not skipped, so the dependency is
-visible rather than silently green. Plan 3's shell tasks must be amended to carry those hooks.
+**The browser lanes declare ELEVEN cross-plan `data-testid` hooks: Plan 4's ten plus Plan 5's
+`solo-button`. The shell must carry all eleven.** A selector mismatch is deliberately not skipped,
+so the dependency stays visible rather than silently green.
 (`lane.spec.ts` is green today and proves the lane itself, including no-redirect on
 `/.well-known/` over real HTTP.)
 
 ## The gate, verified rather than assumed
 
-CLOSED in two places at authoring time: `ShadowLoop.promotionTick()` did not exist (`promoted` was
-a private field with no reader) — now added to Plan 2's final fix pass — and `packages/content`
-does not exist because Plan 3 has not executed. `isDemoted` HAD landed.
+CLOSED in two places at authoring time: promotion state now has the free reader
+`promotionTickOf(loop)` backed by Plan 2's WeakMap (it is deliberately not a `ShadowLoop` member),
+and `packages/content` landed in Plan 3. `isDemoted` had already landed.
 
 ## Decisions worth keeping (contract silent)
 
@@ -61,16 +61,18 @@ does not exist because Plan 3 has not executed. `isDemoted` HAD landed.
   ICE buffered until the remote description; every promise chain has a `.catch`, because Node's
   default unhandled-rejection policy kills the process — the same failure class as a throwing
   decoder.
-- **`seatMapOf().isAuthority`**: the contract's literal `room.race?.shadow.promotionTick() < 0`
+- **`seatMapOf().isAuthority`**: the contract's literal
+  `promotionTickOf(room.race.shadow) < 0`
   does not compile. Ruled: no race => nothing has promoted => the host is authoritative. The other
   reading drops the host's first snapshots, because `startRace` builds the map before `room.race`
   is assigned.
 - **A malformed frame logs `badFrame` and drops; only a version mismatch closes (4001).**
 - **Inbound frames are stamped with the newest `poll(nowMs)`** — a socket callback carries no time
   and `Date.now()` lives in one file. <=8 ms stale, never backwards.
-- **The Playwright lane binds a FIXED loopback port** (`TAPKART_E2E_PORT`, default 3132), not the
-  ephemeral one §10.4 asks for: Playwright must know the URL before starting the server.
-  Loopback-only is preserved.
+- **The Playwright harness binds a fixed loopback port from harness-only `E2E_PORT`** (default
+  3132) and maps it to the child server's `PORT`. Do not pass `TAPKART_E2E_PORT`: the server
+  correctly rejects unknown `TAPKART_*` variables. Playwright must know the URL before starting
+  the server; loopback-only is preserved.
 - **`ENV_SCHEMA` is twelve rows** including the two `TAPKART_*` the container sets (ruling L3), and
   **an empty value is a value, not an absence** — `ICE_SERVERS=` disables STUN, which is exactly
   what F-P4-16's disclosure promises a self-hoster.

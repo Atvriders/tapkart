@@ -468,10 +468,9 @@ ARRIVED."** Plan 4's two real transports are the reason it exists, and every new
 decoder Plan 4 writes is either total or lives behind it.
 
 `withLocalInput`'s shipped method is **`submitLocalInput(playerId, intent)`**,
-taking the tick from `intent.tick`. Plan 3 §2.5 specifies
-`deliverLocalInput(playerId, intent, tick)` on a module named `localinput.ts`.
-That divergence is §16.1 and is the controller's to settle; Plan 4 codes against
-whichever name survives and touches neither file.
+taking the tick from `intent.tick`, owning the 30 Hz cadence, and latching
+odd-tick boolean pulses. Plan 3's contract has been corrected to match. Plan 4
+touches neither file.
 
 ### 2.6 `@tapkart/protocol` — what already exists
 
@@ -682,7 +681,7 @@ Plan 4 task may write into `shadow.ts`, `authority.ts` or `clock.ts`.**
 |---|---|---|
 | G1 | `PROTOCOL_VERSION` becomes `2`. `ROOM_CODE_LENGTH` went 4 → 5 in Task 15c item E, which changes `hello`'s bit layout, so the wire is not backward compatible and the version byte must say so | derived — §3.0 |
 | G2 | `AuthorityLoop` **demotes** on an `authorityChange` it did not send: stops broadcasting snapshots and events, stops emitting. `authority.ts` has no `demote`, no `stop` and no handler for the kind — its `onDatagram` still returns early on anything that is not `input` on `'unreliable'` | F-P4-23, GAP-3 |
-| G3 | `ShadowLoop.promotionTick(): number`, `-1` until promoted. A read-only accessor with no policy in it; the server needs it for `RaceRuntime` bookkeeping, one log line, and `seatMapOf`'s `isAuthority` (§5.5), and today `promoted` is a private field with no reader | derived — §5.8 |
+| G3 | `promotionTickOf(loop: ShadowLoop): number`, `-1` until promoted. A free read-only accessor over Plan 2's WeakMap, with no policy in it; the server needs it for `RaceRuntime` bookkeeping, one log line, and `seatMapOf`'s `isAuthority` (§5.5) | derived — §5.8 |
 | G4 | `playerIdOfInput(buf: Uint8Array): number` in `protocol/src/input.ts` — the first 3 bits of an input body, `-1` on a buffer too short to hold them. Plan 4 may write this one itself: `input.ts` is not a file 15c touches, and §4.7 is the only caller | derived — §4.7 |
 
 **Landed during authoring, and quoted above rather than demanded here:**
@@ -1898,8 +1897,9 @@ export interface RaceRuntime {
 ```
 
 **`RaceRuntime` has no `hostWatch`, no `promoted` and no `promotionTick`**
-(F-P4-22, GAP-4). Promotion state lives in exactly one place — the
-`ShadowLoop` — and the server reads it with `shadow.promotionTick()`.
+(F-P4-22, GAP-4). Promotion state lives in exactly one place — Plan 2's
+WeakMap keyed by the `ShadowLoop` — and the server reads it with
+`promotionTickOf(shadow)`.
 
 ### 5.2 `src/env.ts` — PURE, and the single source of truth for configuration (C-6)
 
@@ -2058,7 +2058,8 @@ export function buildStartMessage(room: RoomRecord, seed: number): StartMessage
 export function humanMaskOf(room: RoomRecord): number
 export function characterIdxOf(room: RoomRecord): number[]   // length MAX_KARTS
 /** §4.7's map, built from the room's seats. `isAuthority` is true only for
- *  `room.hostPeerId`, and only while `room.race?.shadow.promotionTick() < 0` —
+ *  `room.hostPeerId`, and only while there is no race or
+ *  `promotionTickOf(room.race.shadow) < 0` —
  *  after promotion nothing inbound is authoritative. */
 export function seatMapOf(room: RoomRecord): PeerAuthority
 /** Host-only actions are gated here, not at the call site, so there is one
@@ -2236,7 +2237,7 @@ export function startRace(opts: StartRaceOptions): RaceRuntime
  *  Returns how many ticks ran. SOLE CALLER of ShadowLoop.tick(). */
 export function stepRace(run: RaceRuntime, nowMs: number): number
 
-/** Reads `run.shadow.promotionTick()` and, on the first pass where it is no
+/** Reads `promotionTickOf(run.shadow)` and, on the first pass where it is no
  *  longer -1, writes ONE `promotion` LogEvent. It decides nothing: promotion has
  *  already happened inside the loop by the time this observes it. Returns true
  *  on that first pass only. */
@@ -2457,7 +2458,7 @@ Resolved into code, exactly once each:
 | who broadcasts `authorityChange` | `ShadowLoop.promote()` (`shadow.ts:538-540`) |
 | the re-seed formula | `promotionCursor(raceSeed, tick)` (`sim/src/rng.ts:51`), called at `shadow.ts:478` |
 | `eventSeq` continuity | `eventSeqFloor`, raised into `nextEventSeq` by `raiseToEventSeqFloor()` at `shadow.ts:460`, from the highest `eventSeq` in **any** snapshot header seen |
-| what the server does about it | `pollRace` reads `shadow.promotionTick()` and writes one log line |
+| what the server does about it | `pollRace` reads `promotionTickOf(shadow)` and writes one log line |
 
 ### 6.2 The cadences
 
@@ -2974,7 +2975,7 @@ Symbols Plan 4 *uses* but does not own are counted against **Plan 2**, not here:
 `MAX_CATCHUP_TICKS`, `TickAccumulator`, `makeTickAccumulator`,
 `advanceAccumulator` (`net/clock`); `ROOM_CODE_ALPHABET`, `ROOM_CODE_LENGTH`,
 `LOBBY_PATH_PREFIX`, `normalizeRoomCode`, `isValidRoomCode`, `lobbyPathFor`
-(`protocol/room`); and the one pending accessor `ShadowLoop.promotionTick`
+(`protocol/room`); and the free accessor `promotionTickOf(loop)`
 (§2.10 G3). `playerIdOfInput` is counted above because Plan 4 writes it (G4).
 
 The draft counted 213 across a materially different module map. The delta
@@ -3320,18 +3321,17 @@ can only ever route a player into a different real room.
 
 ---
 
-## 16. Unruled, needs the controller
+## 16. Controller decisions, resolved
 
-Four items. None of them blocks authoring — this contract states what it does in
-each case — but each is a decision that belongs to the controller, not to a
-contract author.
+These four items were open during authoring. They are retained as the audit trail
+for the decisions now reflected in the plans and source.
 
-### 16.1 `net/src/local.ts` and ruled Plan 3 §2.5 disagree on a name and a signature
+### 16.1 Resolved: Plan 3 now matches shipped `net/src/local.ts`
 
-Plan 3's **locked** contract §2.5 specifies:
+The stale Plan 3 draft specified:
 
 ```ts
-// packages/net/src/localinput.ts — Plan 2 Task 15b (R42)
+// stale draft only
 export interface LocalInputTransport extends Transport {
   deliverLocalInput(playerId: number, intent: Intent, tick: number): void
 }
@@ -3346,52 +3346,46 @@ export interface LocalInputTransport extends Transport {
 }
 ```
 
-Different module name, different method name, and the tick moves from a parameter
-to `intent.tick`. Plan 3 §5.10's `tickOnce` calls
-`transport.deliverLocalInput(localPlayerId, localIntent, state().tick + 1)` and
-will not compile against what shipped. Plan 4 needs this only for the host's
-composition (`withLocalInput(fanOut)`), so it is cheap for **this** plan either
-way — but it is a hard compile error for Plan 3, and the fix is one edit in one
-of the two documents. **This contract names neither and touches neither file.**
+The controller resolved the divergence in favor of shipped Plan 2. Plan 3 now
+stamps `intent.tick = state().tick + 1`, calls
+`transport.submitLocalInput(localPlayerId, intent)` every simulation tick, and
+lets the decorator own the 30 Hz cadence and odd-tick boolean latch. Plan 4 uses
+the same shipped surface and touches neither file.
 
-### 16.2 Who owns the README env table that C-6's drift test reads
+### 16.2 Resolved: README links to the generated server-env document
 
 C-6 says *"The Dockerfile, the compose file and the README table are checked
 against it by a test that fails when they drift."* Plan 4 owns none of those
 three files — they are all Plan 5's. §10.2 resolves the half it can: Plan 4 ships
 `docs/server-env.md` and asserts it against `formatEnvTable()`, and Plan 5
-asserts its own two files against the exported `ENV_SCHEMA`. What is unassigned is
-whether the **repo README** also grows an env table (a fourth copy to keep in
-step) or whether it links to `docs/server-env.md` (this contract's assumption,
-and the one that keeps the count at two).
+asserts its own two files against the exported `ENV_SCHEMA`. The repo README
+links to `docs/server-env.md`; it does not add a fourth table copy.
 
-### 16.3 Ruled Plan 3 §5.8 is superseded three times over, and needs one edit
+### 16.3 Resolved: room codes belong to `@tapkart/protocol`
 
-Not a fork — every one of these is settled by a ruling or by shipped code — but
-they land in a **locked** contract that says *"No task may rename, re-sign, or add
-fields to anything below"*, so somebody has to make the edit rather than leave two
-documents disagreeing. Plan 3 §5.8 currently reads:
+The stale Plan 3 draft read:
 
 ```ts
 export const ROOM_CODE_LENGTH = 4
-/** Ambiguity-free: no O/0, no I/1. Exactly '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' (32 chars). */
+/** Stale alphabet and normalization rules. */
 export const ROOM_CODE_ALPHABET: string
 /** Upper-cases, strips every character outside the alphabet, truncates to
  *  ROOM_CODE_LENGTH. Total: never throws, never returns undefined. */
 export function normalizeRoomCode(raw: string): string
 ```
 
-Three things are now false: the length is 5 (F-P4-34, shipped), the alphabet is
+Three things there are false: the length is 5 (F-P4-34, shipped), the alphabet is
 Crockford and the gloss describes the wrong exclusion set (§15.12, shipped), and
 `normalizeRoomCode` neither strips nor truncates (shipped). A fourth was already
 ruled: the module moves to `@tapkart/protocol` and `game`'s copy is deleted
-(C-7). **The whole of Plan 3 §5.8 becomes one line — "room codes are
-`@tapkart/protocol`'s, see Plan 4 §3.2" — and `game` imports them.**
+(C-7). The controller applied that edit: Plan 3 imports the shipped five-character
+Crockford code, validator, and trim-plus-uppercase normalizer from
+`@tapkart/protocol`; `game/src/roomcode.ts` does not exist.
 
-### 16.4 F-P4-34's five-character room code contradicts the spec, in four places
+### 16.4 Resolved: the spec now says five-character room code
 
 The rulings document's own instruction is *"where a ruling contradicts the spec,
-say so and stop."* Saying so:
+say so and stop."* This was the contradiction:
 
 **F-P4-34 rules five-character room codes.** The spec says four, four times:
 
@@ -3405,8 +3399,7 @@ The ruling is unambiguous and reasoned (*"Five characters — 32⁵ ≈ 33.5 M, 
 typeable, 32× the space of four"*), and it is the mitigation for a brute-force
 exposure this project has already been bitten by, so this contract implements
 **five** and derives `PROTOCOL_VERSION = 2` from the resulting wire change
-(§3.0). What the controller owes is a **one-word spec amendment in those four
-places** — and, separately, the §16.3 edit that retires ruled Plan 3 §5.8.
+(§3.0). The controller applied the spec amendment in all four places and added an
+amendment note; §16.3 records the companion Plan 3 correction.
 
 Nothing else in this document is unruled.
-
