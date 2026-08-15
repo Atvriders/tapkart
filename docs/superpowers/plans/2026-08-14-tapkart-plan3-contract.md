@@ -746,19 +746,24 @@ export function correctionDeltaOf(client: ClientLoop, outPos: Vec3): number | nu
 export const LOCAL_PEER_ID = 'local'
 
 export interface LocalInputTransport extends Transport {
-  /** Delivers `intent` to whatever loop is listening on THIS transport, exactly
+  /** Submits `intent` to whatever loop is listening on THIS transport, exactly
    *  as if it had arrived from a peer: encodeHeader(_, 'input') + encodeInput
-   *  over an INPUT_REDUNDANCY-long window whose newest slot carries `tick`,
+   *  over an INPUT_REDUNDANCY-long window whose newest slot carries
+   *  `intent.tick`,
    *  dispatched to every registered onMessage callback with peerId LOCAL_PEER_ID
    *  and channel 'unreliable'.
    *
-   *  `tick` MUST be strictly increasing across calls: AuthorityLoop keeps an
+   *  Call this every simulation tick. The decorator itself sends on even ticks
+   *  for 30 Hz parity with ClientLoop, and latches odd-tick brake, drift and
+   *  useItem pulses into the next even-tick datagram.
+   *
+   *  `intent.tick` MUST be strictly increasing across calls: AuthorityLoop keeps an
    *  intent only when `it.tick > heldIntentTick[playerId]` (authority.ts:131).
-   *  Callers pass `state().tick + 1`. */
-  deliverLocalInput(playerId: number, intent: Intent, tick: number): void
+   *  Callers stamp it with `state().tick + 1`. */
+  submitLocalInput(playerId: number, intent: Intent): void
 }
 
-/** Decorates any Transport with deliverLocalInput. Everything else delegates to
+/** Decorates any Transport with submitLocalInput. Everything else delegates to
  *  `inner`; onMessage callbacks are registered with BOTH `inner` and this
  *  wrapper's own list. Allocates its encode buffer once. */
 export function withLocalInput(inner: Transport): LocalInputTransport
@@ -776,8 +781,10 @@ export function createNullTransport(): Transport
 `TICK_MS` in `clock.ts` (Task 15c item F moved it there, per §2.4's own
 already-amended text) and the local-input surface in `local.ts`, not
 `localinput.ts` — that name belongs to `packages/game/src/localinput.ts` (§5.10a),
-a different file in a different package. The comments above are corrected to
-match; nothing about the shapes themselves changed.*
+a different file in a different package. The comments and local-input shape
+above are corrected to match shipped Plan 2: `submitLocalInput` takes two
+arguments, reads `intent.tick`, owns the 30 Hz cadence, and latches odd-tick
+boolean pulses.*
 
 **Why it carries heading too (R48).** `EPS.heading = 0.0025` rad is the threshold
 at which a heading correction *fires*, not the size of the correction that
@@ -2528,17 +2535,18 @@ deferral §15.2 describes, and contradicted by this very paragraph. R44 puts
 corrected to match.*
 
 `tickOnce` is `cloneState(state(), prev)` and then `loop.tick(...)`: for host and
-solo it additionally calls `transport.deliverLocalInput(localPlayerId,
-localIntent, state().tick + 1)` **before** `AuthorityLoop.tick()`, because
-`AuthorityLoop` has no other input path (§2.4 fact 1, §5.10a).
+solo it additionally stamps `localIntent.tick = state().tick + 1` and calls
+`transport.submitLocalInput(localPlayerId, localIntent)` **before**
+`AuthorityLoop.tick()`, because `AuthorityLoop` has no other input path (§2.4
+fact 1, §5.10a).
 
-**Q15: `transport` is never `null`, and solo uses a loopback transport with zero
-peers.** Exactly one code path exists, and solo — the mode that will be run
-thousands of times during development — exercises the same `AuthorityLoop` the
-host runs. A `null` transport creates a second path that is simpler in the moment
-and untested forever; this project has already paid for one of those (the
-module-scope bot hold that made `step` non-instanceable, invisible until two
-rooms shared a process).
+**Q15: `transport` is never absent, and solo uses a local-input decorator over a
+zero-peer null transport.** Exactly one loop path exists, and solo — the mode
+that will be run thousands of times during development — exercises the same
+`AuthorityLoop` the host runs. The purpose-built null transport drops broadcasts
+immediately; unlike one unpumped half of a loopback pair, it never accumulates
+undeliverable snapshots. The local-input decorator still routes the player's
+intent through the real codec and the authority's normal `onMessage` path.
 
 *Amended 2026-08-14 (ruling P2-R29): `sampleRemoteKart` and `sampleRemoteEntity`
 above take a caller-owned `out` and return a boolean, because the `@tapkart/net`
@@ -2560,16 +2568,17 @@ are **`@tapkart/net` exports** (§2.5). A transport decorator is a transport, an
 import { createNullTransport, withLocalInput } from '@tapkart/net'
 import type { LocalInputTransport } from '@tapkart/net'
 
-/** Q15's "LoopbackTransport with zero peers, zero latency, zero loss", composed
- *  from net's two pieces: a transport with nobody on the other end, wrapped so
+/** Q15's zero-peer local transport, composed from net's two pieces: a transport
+ *  with nobody on the other end, wrapped so
  *  the solo player's own intent still reaches the AuthorityLoop through the real
  *  codec. One object, one code path, and the same AuthorityLoop the host runs. */
 export function createSoloTransport(): LocalInputTransport
 ```
 
 A host uses `withLocalInput(realTransport)` directly — Plan 4 supplies the real
-transport; in Plan 3 it is one side of `makeLoopbackPair`. Every role therefore
-puts the local player's intent in through `deliverLocalInput`, which is what makes
+transport; in Plan 3 it is one side of `makeLoopbackPair`. Hosts and solo sessions
+put the local player's intent in through `submitLocalInput`; guests pass it to
+`ClientLoop.tick`. This is what makes
 `AuthorityLoop`'s "drop cheaply, never queue" behaviour (§2.4 fact 3) sufficient
 for solo: nothing is waiting to be pumped.
 
@@ -2760,11 +2769,12 @@ export function startShell(opts: ShellOptions): GameShell
 a `SessionOptions`: it owns the whole app, including `reduceApp`, and constructs a
 session when the screen becomes `'race'`.
 
-#### The ten `data-testid` hooks the shell must carry — **Plan 4's contract, not Plan 3's**
+#### The eleven cross-plan `data-testid` hooks the shell must carry
 
 *Added 2026-08-14.* Plan 4's Task 24 ships `e2e/join-and-race.spec.ts`, spec §8's
 last row, which drives two browser contexts through this shell. Its selector
-contract lives in `e2e/fixtures/tapkart.ts` and is **exactly these ten values**,
+contract lives in `e2e/fixtures/tapkart.ts`; Plan 5 adds the offline-solo hook.
+Together they are **exactly these eleven values**,
 which `startShell` must emit as `data-testid` attributes on the DOM it mounts
 under `opts.root` (and, for one of them, on `opts.canvas`):
 
@@ -2788,7 +2798,7 @@ on the solo control that spec has nothing to drive — a gating test that cannot
 it gates is the failure this project keeps finding. `soloPressed` is already an `AppEvent`
 (§5.9), so unlike ready and start this one is fully Plan 3's to wire.
 
-Three of them name behaviour Plan 3 does not own: `room-code-input` /
+Four of them name behaviour Plan 3 does not own: `room-code-input` /
 `room-code-submit` reach a room that only Plan 4 mints, and `ready-button` /
 `start-button` are lobby traffic §12 puts in Plan 4. **Plan 3's obligation is the
 element and the hook on the right screen** — `hostPressed`, `joinPressed` and
@@ -2866,10 +2876,11 @@ per 60 Hz sim tick. **`ClientLoop` owns the 30 Hz input send cadence and the
 design `AuthorityLoop` was built to mirror, and it keeps the network cadence out
 of the shell.
 
-The host's own input goes in once per tick too, through
-`deliverLocalInput(playerId, intent, state().tick + 1)` (§5.10a) — one datagram
-per tick rather than one per two ticks, because it never touches a wire and the
-strictly-increasing tick is what `AuthorityLoop` keys on.
+The host's own input is submitted once per tick too: the caller stamps
+`intent.tick = state().tick + 1` and calls `submitLocalInput(playerId, intent)`
+(§5.10a). The decorator itself emits at 30 Hz, on even ticks, and carries
+odd-tick boolean pulses forward. The strictly increasing intent tick is what
+`AuthorityLoop` keys on.
 
 ### 6.2 `alpha` is the sub-tick fraction and it is used for exactly three things
 
@@ -3556,7 +3567,7 @@ ranked by how many tasks must agree on them independently:
 | Q12 bundled content, `loadTrack` synchronous, `FetchJson` deleted | §3a.1, §3a.5, §3a.6, §5.3 |
 | Q13 `game` depends on `@tapkart/protocol` | §1, §2.3 |
 | Q14 five screens; countdown and join/host are not screens | §5.9 |
-| Q15 `transport` never null; solo uses a zero-peer loopback | §5.10, §5.10a |
+| Q15 `transport` never absent; solo uses local input over a zero-peer null transport | §5.10, §5.10a |
 | Q16 positions only | §4.8, §5.12 |
 | Q17 DNF derived in `game` | §5.12 |
 | Q18 `clamp(lap + 1, 1, RACE_LAPS)` | §4.8 |
@@ -3591,13 +3602,13 @@ ranked by how many tasks must agree on them independently:
 | R47 `correctionDeltaOf` — the exact delta, from `net` | §2.4, §2.5, §4.9a, §5.10, §5.11 step 11a |
 | R48 heading smoothed too; `correctionDeltaOf` returns `number \| null` | §2.5, §4.9a, §5.10, §5.11 step 11a, §8.1 |
 | **P2-R29** `sampleKart`/`sampleEntity` are out-parameter form; `makeRemoteSample`/`makeRemoteEntitySample` added | §2.5, §5.10, §5.11 (scratch, steps 2 and 10), §7.1, §7.3, §11, §15.1 |
-| **F-P4-24** Plan 4's ten `data-testid` hooks in the shell | §5.13 |
+| **F-P4-24** Eleven cross-plan `data-testid` hooks in the shell: Plan 4's ten plus Plan 5's `solo-button` | §5.13 |
 
 *Amended 2026-08-14: the two rows above are the only rulings in this table that
 arrived **after** the lock. Both are cheap in this document and expensive in
 code, which is the whole reason they were applied now: P2-R29 re-signs a
 `@tapkart/net` method Plan 3 may not edit (§1a), and F-P4-24 names DOM hooks
-another plan's E2E suite already asserts. `promotionTickOf` (a free function over
+the later plans' E2E suites assert. `promotionTickOf` (a free function over
 a `ShadowLoop`, not a member of one) landed in
 the same Plan 2 fix pass and is recorded in §2.4; it gets no row here because
 Plan 3 never calls it.*
@@ -3615,7 +3626,7 @@ without reading three documents.
 
 `AuthorityLoop`'s only input source is `onMessage` (§2.4 fact 1), so a host or
 solo player was bot-driven with no way to steer — a real Plan 2 gap that Q15's
-"solo always uses a `LoopbackTransport`" could not close, because `net` exports
+earlier "solo always uses a loopback transport" wording could not close, because `net` exports
 `makeLoopbackPair`, which mints a *pair*, not a zero-peer transport.
 
 **R42** puts the fix in `net`, where transports live: `withLocalInput`,
@@ -3744,6 +3755,3 @@ TICK_DT` every tick of a spin-out, and `heading` is on the wire — so the field
 would have double-spun the kart, which is exactly the defect Q28 forbids for the
 bubble. The spin comes from `sim`; `render` adds `KART_SPINOUT_ROLL_RADIANS` of
 tilt and nothing else (§4.7).
-
-
-

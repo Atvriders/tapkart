@@ -8066,7 +8066,7 @@ Contract §4.7. Rulings Q27, Q28, Q29.
   export function v3(x: number, y: number, z: number): Vec3
   // used by this task's tests only:
   export function createState(ctx: SimContext, seed: number, characterIdx: number[]): SimState
-  export function spawnEntity(state: SimState, kind: EntityKind, ownerId: number,
+  export function spawnEntity(ctx: SimContext, state: SimState, kind: EntityKind, ownerId: number,
                               position: Vec3, heading: number, targetId: number,
                               ttl: number, events: AuthEvent[]): number
   export function updateEntities(ctx: SimContext, state: SimState, events: AuthEvent[]): void
@@ -8243,7 +8243,7 @@ function bubbleState(ticks: number): {
   state.karts[0].shielded = true
   // Spawned AT the owner: a bubble that never moves therefore sits at radius 0
   // and fails the radius assertion immediately.
-  spawnEntity(state, 'bubble', 0, state.karts[0].position, 0, -1, 600, events)
+  spawnEntity(ctx, state, 'bubble', 0, state.karts[0].position, 0, -1, 600, events)
   for (let n = 0; n < ticks; n++) updateEntities(ctx, state, events)
   const e = state.entities[0]
   const owner = state.karts[0]
@@ -8377,7 +8377,7 @@ describe('surgeAffects', () => {
     const state = createState(ctx, 7, Array.from({ length: MAX_KARTS }, () => 0))
     for (let i = 0; i < MAX_KARTS; i++) state.karts[i].lap.lap = MAX_KARTS - 1 - i
     const events: AuthEvent[] = []
-    spawnEntity(state, 'surge', casterSeat, state.karts[casterSeat].position, 0, -1, 300, events)
+    spawnEntity(ctx, state, 'surge', casterSeat, state.karts[casterSeat].position, 0, -1, 300, events)
     const indexOf = new Int32Array(MAX_KARTS)
     const order = new Int32Array(MAX_KARTS)
     computePlacement(state, indexOf, order)
@@ -14353,7 +14353,7 @@ overwrites it.
   "include": ["src/**/*.ts","test/**/*.ts"]}`. If either is missing, stop: this task cannot resolve
   `@tapkart/sim` by bare specifier without them.
 
-- Produces (contract §5.5 — 26 exported symbols, exactly the census in §11):
+- Produces (contract §5.5 — 30 exported symbols, exactly the census below):
   ```ts
   // controls/types.ts (9)
   export type ControlScheme = 'thumbZones' | 'tilt' | 'virtualStick'
@@ -16558,7 +16558,7 @@ function makeTouchAdapter(scheme: ControlScheme, cfg: ControlConfig): ControlAda
 - [ ] **Step 24: Run the test to verify it passes**
 
 Run: `npx vitest run packages/game/test/controls-composite.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 25: Verify the whole package typechecks and the whole suite is green**
 
@@ -16567,8 +16567,8 @@ Expected: no output. (`noUnusedLocals`, `noUnusedParameters` and `verbatimModule
 `import type` above is deliberate.)
 
 Run: `npx vitest run`
-Expected: PASS. Every pre-existing suite is untouched; this task adds 75 tests across six files
-(12 + 19 + 13 + 11 + 8 + 12).
+Expected: PASS. Every pre-existing suite is untouched; this task adds 74 tests across six files
+(12 + 19 + 13 + 11 + 8 + 11).
 
 - [ ] **Step 26: Commit**
 
@@ -18150,7 +18150,8 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
 
     case 'soloPressed':
       // Seat 0, immediately: SessionOptions forbids localPlayerId === -1 (§5.10),
-      // and solo still runs a real AuthorityLoop over a loopback transport (Q15).
+      // and solo still runs a real AuthorityLoop over the local-input-wrapped
+      // zero-peer null transport (Q15).
       return {
         ...prev,
         screen: 'characterSelect',
@@ -18674,7 +18675,6 @@ git commit -m "feat(game): result rows and DNF, positions only (Q16, Q17)"
   export function cloneState(src: SimState, dst: SimState): void
   export function statesEqual(a: SimState, b: SimState): boolean
   export function allocStateLike(ctx: SimContext, src: SimState): SimState
-  export function resetBotHold(): void          // packages/sim/src/phase.ts:41 — clears the 30 Hz module-scope bot hold
   ```
 - Consumes, from `@tapkart/net` (contract §2.4 + the §2.5 gate, which Task 1 verified is open):
   ```ts
@@ -18817,7 +18817,6 @@ import {
   MAX_ENTITIES,
   MAX_KARTS,
   createState,
-  resetBotHold,
   statesEqual,
 } from '@tapkart/sim'
 import {
@@ -18852,10 +18851,9 @@ function makeSolo(localPlayerId = 0): RaceSession {
 
 /** Runs `ticks` ticks with one held intent and returns the local kart position. */
 function driveSolo(steer: number, accel: number, ticks: number): { x: number; z: number } {
-  // The 30 Hz bot hold is module-scope in packages/sim/src/phase.ts, so a
-  // previous run in this process can otherwise leak one odd tick of bot intent
-  // into this one. Clearing it is what makes the comparison below exact.
-  resetBotHold()
+  // Each session owns a fresh SimState, including the per-seat bot input hold.
+  // Sequential runs therefore begin from identical state without a module-level
+  // reset hook.
   const s = makeSolo(0)
   const it = intent(steer, accel)
   for (let t = 0; t < ticks; t++) s.tickOnce(it)
@@ -19146,8 +19144,8 @@ import { createNullTransport, withLocalInput } from '@tapkart/net'
 import type { LocalInputTransport } from '@tapkart/net'
 
 /**
- * Q15's "LoopbackTransport with zero peers, zero latency, zero loss", composed
- * from net's two pieces: a transport with nobody on the other end, wrapped so
+ * Q15's zero-peer local transport, composed from net's two pieces: a transport
+ * with nobody on the other end, wrapped so
  * the solo player's own intent still reaches the AuthorityLoop through the real
  * `encodeInput` codec. One object, one code path, and the same AuthorityLoop the
  * host runs — including the identical 8-bit steer / 6-bit accel quantisation
@@ -19595,7 +19593,7 @@ Then typecheck: `npx tsc --noEmit -p packages/game/tsconfig.json` — expected: 
 | carries characterIdx | reading `characterIdx` off `state()` on a guest | yes — the two sources are provably different (2 vs 0) *before* the assertion |
 | copies characterIdx | retaining the caller's array | yes |
 | rejects a plain Transport | a host silently bot-driven forever | yes |
-| left/right/neutral separation | `submitLocalInput` not called, or called with a non-increasing `intent.tick`, or a `null` transport path | yes — under the bug all three runs are the same bot-driven kart and every separation is exactly 0. `resetBotHold()` and sequential (never interleaved) runs are what make that exact |
+| left/right/neutral separation | `submitLocalInput` not called, or called with a non-increasing `intent.tick`, or a `null` transport path | yes — under the bug all three runs are the same bot-driven kart and every separation is exactly 0. Fresh per-session state and sequential (never interleaved) runs are what make that exact |
 | prevState trails by one | cloning after the tick instead of before, or allocating per frame | yes — the delta would be 0, and Q9's lerp would be a silent no-op |
 | two views, swap in place | one view (the contract defect), or allocating a view per frame | yes — `not.toBe` and the two-identity set |
 | remote sampling | sampling the local seat from the interpolator, or building an interpolator on a host | yes |
@@ -19687,7 +19685,7 @@ git commit -m "feat(game): race session composition root, solo transport and the
   export function driftTierFor(charge: number, tiers: [number, number, number]): number   // -1 = none
   export function itemBoxWorldPos(ctx: SimContext, boxIdx: number, out: Vec3): void       // writes out, returns void
   export function wrapAngle(a: number): number                                            // (-π, π]
-  export function spawnEntity(state: SimState, kind: EntityKind, ownerId: number, position: Vec3,
+  export function spawnEntity(ctx: SimContext, state: SimState, kind: EntityKind, ownerId: number, position: Vec3,
                               heading: number, targetId: number, ttl: number,
                               events: AuthEvent[]): number    // packages/sim/src/entity.ts:45
   ```
@@ -19711,7 +19709,7 @@ git commit -m "feat(game): race session composition root, solo transport and the
   because a held-steady intent produces about one correction per 600 ticks, so a
   smoothing test driven by one would have nothing to smooth.
 - Consumes, from `@tapkart/sim`, in the tests only: `TICK_DT`, `cloneState`,
-  `createState`, `resetBotHold`, `RACE_LAPS`.
+  `createState`, `RACE_LAPS`.
 
 - Produces:
   ```ts
@@ -19791,7 +19789,6 @@ import {
   allocStateLike,
   cloneState,
   createState,
-  resetBotHold,
   spawnEntity,
   wrapAngle,
 } from '@tapkart/sim'
@@ -19812,7 +19809,6 @@ function intent(steer: number, accel: number): Intent {
 }
 
 function makeSolo(localPlayerId = 0): RaceSession {
-  resetBotHold()
   return createSession({
     role: 'solo',
     ctx: makeGameContext(true),
@@ -19946,6 +19942,7 @@ describe('the seat-source rule (§7.1) — the flagship', () => {
     const owner = pair.host.state().karts[3]
     const spawnEvents: AuthEvent[] = []
     spawnEntity(
+      pair.host.ctx,
       pair.host.state(),
       'slick',
       3,
@@ -20140,7 +20137,7 @@ describe('Q9\'s alpha lerp', () => {
     const s = makeSolo(0)
     const b = createViewBuilder(s)
     const k = s.state().karts[0]
-    spawnEntity(s.state(), 'slick', 0, { x: k.position.x, y: k.position.y, z: k.position.z }, 0, -1, 600, [])
+    spawnEntity(s.ctx, s.state(), 'slick', 0, { x: k.position.x, y: k.position.y, z: k.position.z }, 0, -1, 600, [])
     s.tickOnce(intent(0, 0))
 
     const cur = s.state().entities[0]
@@ -20291,7 +20288,7 @@ Create `packages/game/test/frameloop.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
 import type { Intent } from '@tapkart/sim'
-import { COUNTDOWN_TICKS, RACE_LAPS, TICK_DT, resetBotHold } from '@tapkart/sim'
+import { COUNTDOWN_TICKS, RACE_LAPS, TICK_DT } from '@tapkart/sim'
 import {
   ERROR_SMOOTH_WINDOW_TICKS,
   buildAudioModel,
@@ -20312,7 +20309,6 @@ const ONE_SHOTS = new Set([
 
 describe('the frame loop\'s two views (§5.10, §5.13)', () => {
   it('fires exactly one lapCross cue across a race that crosses one lap', () => {
-    resetBotHold()
     const intent: Intent = { tick: 0, steer: 0.2, accel: 1, brake: false, drift: false, useItem: false }
     const session = createSession({
       role: 'solo',
@@ -20383,7 +20379,6 @@ describe('the frame loop\'s two views (§5.10, §5.13)', () => {
  */
 describe('error smoothing, end to end (§8.1, R41)', () => {
   it('eases a real correction to zero instead of snapping', () => {
-    resetBotHold()
     // 180 ticks of sine steering: the fixture's own job, and it returns a guest
     // that has already taken corrections rather than one that might.
     const g = makeCorrectingGuest(180)
@@ -21111,7 +21106,7 @@ staying broken across three. This task now *consumes* `buildResultRows`.
   immediately with `connectFailed`, and the race screen always builds a solo
   transport. That is honest about what this build can do; a lobby that spins
   forever is not.
-- **The shell carries ten `data-testid` hooks, and they are ANOTHER PLAN'S
+- **The shell carries eleven `data-testid` hooks, and they are OTHER PLANS'
   contract** (*added 2026-08-14*; contract §5.13). Plan 4 Task 24 ships
   `e2e/join-and-race.spec.ts` — spec §8's last row, two browser contexts joining
   by code and finishing a race — and its selector contract lives in
@@ -21331,7 +21326,7 @@ import { SCREEN_TRANSITIONS, createAppState, reduceApp } from './app'
 // clock.test.ts scans every packages/*/src tree on every run to keep that true.
 // Room codes come from @tapkart/protocol for the same one-copy reason.
 import { advanceAccumulator, makeTickAccumulator } from '@tapkart/net'
-import { isValidRoomCode, normalizeRoomCode } from '@tapkart/protocol'
+import { ROOM_CODE_LENGTH, normalizeRoomCode } from '@tapkart/protocol'
 import type { FrameClock } from './clock'
 import { accumulatorAlpha } from './clock'
 import type { ControlAdapter, ControlInputs, Viewport } from './controls/types'
@@ -21385,8 +21380,8 @@ const BUTTON_LABELS: Readonly<Record<string, string | undefined>> = {
 }
 
 /**
- * PLAN 4'S E2E CONTRACT WITH THIS SHELL — ten `data-testid` values, copied
- * verbatim from `e2e/fixtures/tapkart.ts` (Plan 4 Task 24). Renaming one here
+ * CROSS-PLAN E2E CONTRACT WITH THIS SHELL — Plan 4's ten `data-testid` values
+ * plus Plan 5's `solo-button`. Renaming one here
  * breaks `e2e/join-and-race.spec.ts` in another plan, and it breaks it silently
  * from this file's point of view: nothing in `packages/game` imports these.
  *
@@ -21413,7 +21408,7 @@ const TESTIDS = {
   soloButton: 'solo-button',
 } as const
 
-/** The three transition-table buttons Plan 4 drives by testid. Everything else
+/** The four transition-table buttons the E2E lanes drive by testid. Everything else
  *  in BUTTON_LABELS is unhooked, which is correct: an E2E asserts the flow it
  *  owns, not every control on the screen. */
 const BUTTON_TESTIDS: Readonly<Record<string, string | undefined>> = {
@@ -21531,7 +21526,13 @@ export function startShell(opts: ShellOptions): GameShell {
       isLeader: st.role !== 'guest',
     }
     const characterIdx: number[] = []
-    for (let i = 0; i < MAX_KARTS; i++) characterIdx.push(st.slots[i].characterIdx)
+    for (let i = 0; i < MAX_KARTS; i++) {
+      characterIdx.push(
+        st.role === 'solo'
+          ? (i === st.localPlayerId ? st.settings.characterIdx : i % CHARACTERS.length)
+          : st.slots[i].characterIdx,
+      )
+    }
 
     const session = createSession({
       role: st.role,
@@ -21687,13 +21688,13 @@ export function startShell(opts: ShellOptions): GameShell {
     if (legal.includes('roomCodeEntered')) {
       const input = document.createElement('input')
       input.placeholder = 'ROOM CODE'
-      input.maxLength = 8
+      input.maxLength = ROOM_CODE_LENGTH
       input.setAttribute('data-testid', TESTIDS.roomCodeInput)
       const go = button(
         'GO',
         () => {
           const code = normalizeRoomCode(input.value)
-          if (isValidRoomCode(code)) dispatch({ kind: 'roomCodeEntered', code })
+          dispatch({ kind: 'roomCodeEntered', code })
         },
         TESTIDS.roomCodeSubmit,
       )
@@ -21906,7 +21907,7 @@ Expected: the game suite passes and `tsc` prints nothing — **including the app
 module's `TS2307`**, which the results task cleared several tasks ago. If it is back,
 `src/results.ts` was deleted or never landed.
 
-Then verify Plan 4's ten hooks are present and spelled exactly right — *added
+Then verify the cross-plan eleven hooks are present and spelled exactly right — *added
 2026-08-14*, because this is the one obligation in this task that no test in this
 repository can currently detect, and the plan that CAN detect it does not run
 until Plan 5's CI job:
@@ -22019,8 +22020,8 @@ git commit -m "feat(game): the shell adapter and the package barrel"
 - Consumes, from `@tapkart/content`: `TUNING`, `CHARACTERS`, `loadTrack`, `loadContentBundle`.
   **`CHARACTERS` is `readonly CharacterStats[]` and does not assign to
   `SimContext.characters: CharacterStats[]` — write `CHARACTERS.slice()`.**
-- Consumes, from `@tapkart/sim`: `COUNTDOWN_TICKS`, `RACE_LAPS`, `resetBotHold`,
-  `spawnEntity(state, kind, ownerId, position, heading, targetId, ttl, events): number`.
+- Consumes, from `@tapkart/sim`: `COUNTDOWN_TICKS`, `RACE_LAPS`,
+  `spawnEntity(ctx, state, kind, ownerId, position, heading, targetId, ttl, events): number`.
 
 - Produces:
   ```ts
@@ -22323,7 +22324,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AuthEvent, Intent, SimContext } from '@tapkart/sim'
-import { COUNTDOWN_TICKS, RACE_LAPS, resetBotHold, spawnEntity } from '@tapkart/sim'
+import { COUNTDOWN_TICKS, RACE_LAPS, spawnEntity } from '@tapkart/sim'
 import { CHARACTERS, TUNING, loadContentBundle, loadTrack } from '@tapkart/content'
 import type { CameraMode, RaceView } from '@tapkart/render'
 import {
@@ -22373,10 +22374,6 @@ function cameraModeFor(view: RaceView): CameraMode {
 /** Drives the REAL per-frame path — session, ViewBuilder, camera, frame, HUD —
  *  exactly as the shell does, minus the DOM and the GPU. */
 function renderGolden(): string {
-  // The 30 Hz bot hold is module-scope in packages/sim/src/phase.ts. A golden
-  // that did not clear it would depend on whatever ran in this process first.
-  resetBotHold()
-
   const loaded = loadTrack(TRACK_ID)
   const bundle = loadContentBundle()
   const ctx: SimContext = {
@@ -22403,12 +22400,12 @@ function renderGolden(): string {
   const st = session.state()
   const events: AuthEvent[] = []
   const slickOwner = st.karts[4]
-  spawnEntity(st, 'slick', 4,
+  spawnEntity(ctx, st, 'slick', 4,
     { x: slickOwner.position.x + 3, y: slickOwner.position.y, z: slickOwner.position.z + 3 },
     0.5, -1, 900, events)
   st.karts[2].shielded = true
   const bubbleOwner = st.karts[2]
-  spawnEntity(st, 'bubble', 2,
+  spawnEntity(ctx, st, 'bubble', 2,
     { x: bubbleOwner.position.x, y: bubbleOwner.position.y, z: bubbleOwner.position.z },
     0, -1, 900, events)
 
@@ -22636,7 +22633,7 @@ suite is green, and both typechecks print nothing.
 | operator check | the whole reason Plan 3 exists: that this is a game a human can play | this is the only check that can see it (§8.3) |
 | operator check, item 3a | **a missing ground plane, uncoloured pads and ramps, or undrawn item boxes** — three things the pure layer produces (`theme.ground`, baked vertex colours, `TrackScene.itemBoxes`) and only the Three.js adapter consumes | yes, and **only here**: CI never imports the adapter, so a `setScene` that silently dropped any of the three would ship a ribbon floating over the sky with invisible pickups and every test still green |
 | golden byte-identity | any regression in `buildRenderFrame`, `updateCamera`, `buildHudModel`, `ViewBuilder.build` or `RaceSession` that moves a derived number | yes, with the first differing line named |
-| golden determinism | a clock, a random number, or leaked module-scope state in the frame path | yes — and it is why `resetBotHold()` is called at the top of every run |
+| golden determinism | a clock, a random number, or leaked state in the frame path | yes — each run constructs fresh per-session state, including bot input holds |
 | golden covers something | **the failure mode this project keeps shipping**: a fixture frozen over eight invisible karts and zero entities, byte-stable forever, detecting nothing | yes — `visible=true`, a non-zero `wheelSpin` and at least one visible entity are asserted, so the net cannot quietly become decoration |
 
 - [ ] **Step 7: Commit**
