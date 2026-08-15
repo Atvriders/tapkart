@@ -31,6 +31,32 @@ New for Plan 2:
 | Time | ticks only. No `Date.now()` anywhere in `protocol`; `net` reads the clock **only** in transports and loop schedulers, never in codecs or reconciliation |
 | Channel names | `'unreliable'` and `'reliable'` — those exact strings |
 | A follower never emits | `emit()` is gated on `ctx.isLeader` at **all** call sites; a follower's `nextEventSeq` is advanced only by applying received events |
+| `applyEvent` obeys, it does not re-adjudicate | applying an authoritative event writes state **directly**, bypassing the originating function's refusal rules |
+
+### The `startSpinOut` sole-writer rule has exactly one exception: `applyEvent`
+
+*Ruled 2026-08-14 during execution, after Task 13 correctly flagged the conflict.*
+
+Plan 1 §0 says `startSpinOut` is the sole writer of `spinOutTicks` — nothing else
+assigns it. `net`'s `applyEvent` breaks that rule deliberately when applying a
+`spinOut` event, and must.
+
+`startSpinOut` carries refusal rules: it declines while a kart is invulnerable or
+respawning, and never shortens an existing spin. Those exist so the *authority*
+cannot produce an illegal spin. But a `spinOut` event only exists **because the
+authority already ran those rules and accepted**. If a follower routed the event
+back through `startSpinOut`, its own slightly-diverged local state could refuse —
+and the follower's kart would stay upright while the leader's spun. That is a
+divergence introduced by the very function meant to prevent one.
+
+So the rule is: **the authority adjudicates, the follower obeys.** Inside
+`applyEvent`, an authoritative event is applied as fact. Everywhere else in the
+simulation, `startSpinOut` remains the sole writer, and Plan 1's reasoning stands
+unchanged.
+
+The same principle governs every kind `applyEvent` handles — it is a replay of
+decisions already made, not a second chance to make them.
+
 
 **The single most error-prone thing in this package is the epsilon/step
 relationship.** Spec §5: *"Each epsilon is derived from, and must exceed, that
@@ -169,9 +195,15 @@ Zero dependencies except `@tapkart/sim` for its types. No DOM. No clock.
 export const PROTOCOL_VERSION = 1
 export type ChannelName = 'unreliable' | 'reliable'
 
+// Amended by Task 15c (controller ruling, item D): `clientUpdate` and
+// `resyncRequest` are additive — no existing message's bit layout changes.
+// Overloading `hello` for ready toggles, character changes, track choice, start,
+// resync requests and seat reclaims made every handler distinguish intent by
+// FIELD INSPECTION, and the MessageKind -> handler table is a top-ranked shared
+// name risk. Plan 4 defines the bodies.
 export type MessageKind =
-  | 'hello' | 'welcome' | 'lobby' | 'start'
-  | 'input' | 'snapshot' | 'events' | 'checkpoint'
+  | 'hello' | 'welcome' | 'lobby' | 'start' | 'clientUpdate'
+  | 'input' | 'snapshot' | 'events' | 'checkpoint' | 'resyncRequest'
   | 'authorityChange' | 'ping' | 'pong'
 
 export interface WireHeader { kind: MessageKind; protocolVersion: number }
@@ -180,10 +212,21 @@ export interface WireHeader { kind: MessageKind; protocolVersion: number }
 // cannot dispatch, and each of Tasks 11/14/15/16 would invent its own —
 // which is exactly what happened when this was left unspecified.
 export const WIRE_TAG = {
-  hello: 0x01, welcome: 0x02, lobby: 0x03, start: 0x04,
-  input: 0x10, snapshot: 0x11, events: 0x12, checkpoint: 0x13,
+  hello: 0x01, welcome: 0x02, lobby: 0x03, start: 0x04, clientUpdate: 0x05,
+  input: 0x10, snapshot: 0x11, events: 0x12, checkpoint: 0x13, resyncRequest: 0x14,
   authorityChange: 0x20, ping: 0x30, pong: 0x31,
 } as const
+
+// packages/protocol/src/room.ts                        [Task 15c, item E]
+// Room codes travel on the wire, so they live here and not in `server` or
+// `game`; `LOBBY_PATH_PREFIX` is compiled into the APK's autoVerify pathPrefix
+// and is FROZEN at the first signed release. FIVE characters, not four.
+export const ROOM_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'  // Crockford: no I, L, O, U
+export const ROOM_CODE_LENGTH = 5
+export const LOBBY_PATH_PREFIX = '/r/'
+export function normalizeRoomCode(input: string): string   // trim + uppercase, total
+export function isValidRoomCode(code: string): boolean     // canonical form only
+export function lobbyPathFor(code: string): string         // throws on an invalid code
 export function encodeHeader(out: Uint8Array, kind: MessageKind): number  // bytes written (2: tag + version)
 export function decodeHeader(buf: Uint8Array): WireHeader                 // throws on unknown tag or version mismatch
 
@@ -282,6 +325,7 @@ export interface WireEntity {
 }
 export interface WireSnapshot {
   tick: number; eventSeq: number
+  phase: RacePhase                      // Task 15c item A: 2 bits, in the header
   lastProcessedInputTick: number[]      // length MAX_KARTS
   karts: WireKart[]                     // length MAX_KARTS
   entities: WireEntity[]                // length MAX_ENTITIES, live packed at front
@@ -351,8 +395,26 @@ list and the locked type: entities are interpolated rather than predicted, and
 real per-axis velocity is what makes that interpolation good. The cost is ~4 B
 per live entity, capped at 32.
 
-Header: `tick u32`, `eventSeq u32`, `lastProcessedInputTick 8×u16`,
-`entityCount u8` → **200 bits**.
+Header: `tick u32`, `eventSeq u32`, `phase u2`, `lastProcessedInputTick 8×u16`,
+`entityCount u8` → **202 bits**.
+
+*Amended 2026-08-14 (Task 15c item A, corrected in its fix round).* The `phase`
+row and the 200 → **202** bit total are the amendment. §3 above already listed
+`phase: RacePhase` on `WireSnapshot` as of Task 15c; this line still said 200
+bits with no phase row, so the same document gave two different answers about
+whether the race phase is on the wire — and the header total is the number every
+send-buffer comment in `@tapkart/net` derives its worst case from. The worst-case
+snapshot is therefore **744 B** (`8×178 + 32×135 + 202 = 5946 bits`), not 743.
+The row sits between `eventSeq` and `lastProcessedInputTick` because that is where
+`encodeSnapshot` writes it, and it is written **once per snapshot in the header**
+rather than as a 23rd per-kart column: `phase` lives on `SimState`, not on the
+kart struct, and eight copies of one global value would be a wire format capable
+of expressing eight karts disagreeing about whether the race has started.
+
+Code 3 of the two is unreachable for an encoder — `RacePhase` has three values —
+and `decodeSnapshot` **rejects** a datagram carrying it rather than clamping, so
+it reaches @tapkart/net's datagram guard as a counted drop like every other
+undecodable datagram.
 
 **The per-record byte figures are informational, not a padding rule.** The stream
 is continuously bit-packed — `BitWriter`/`BitReader` expose no `align()` and none
@@ -429,7 +491,28 @@ export class ClientLoop {
 }
 
 // packages/net/src/shadow.ts                                  [Task 16]
-export class ShadowLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(): void; promote(tick: number): void }
+// tick() takes the scheduler's wall clock as of Task 15c item C: host loss is
+// 1.5s of WALL TIME with no snapshot (HOST_TIMEOUT_MS), never a tick count — a
+// tick counter stalls exactly when the room's ticker stalls or clamps at
+// MAX_CATCHUP_TICKS, which is when host loss actually happens. Absolute, on the
+// same timebase as LoopbackTransport.pump(nowMs), and required, not optional.
+export class ShadowLoop { constructor(ctx: SimContext, state: SimState, t: Transport); tick(nowMs: number): void; promote(tick: number): void }
+
+// packages/net/src/clock.ts                            [Task 15c, item F]
+// One home for the catch-up constant: Plan 3's game clock and Plan 4's server
+// ticker are the same function, and `server` may not import `game`.
+export const TICK_MS: number                 // 1000 / TICK_HZ, moved here from client.ts
+export const MAX_CATCHUP_TICKS = 5
+export interface TickAccumulator { residualMs: number }
+export function makeTickAccumulator(): TickAccumulator
+export function advanceAccumulator(acc: TickAccumulator, elapsedMs: number): number
+
+// packages/net/src/authority.ts                        [Task 15c, item B]
+// A host that receives a foreign `authorityChange` stands down for good: it
+// stops broadcasting snapshots and events and stops emitting, while continuing
+// to step its own view. Authority NEVER returns to the original host — exactly
+// one authority at every instant, so no rewind rule is ever needed.
+export function isDemoted(loop: AuthorityLoop): boolean
 
 // packages/net/src/index.ts                                   [Task 18]
 ```

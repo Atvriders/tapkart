@@ -17,7 +17,7 @@ The game ships as one TypeScript codebase producing two artifacts:
 - a **browser PWA**, served from a Docker image, playable on any phone or desktop
 - an **Android APK** (Capacitor) whose only added capability is NFC
 
-Only the host needs the APK. Everyone else joins by tap, QR, or a four-character
+Only the host needs the APK. Everyone else joins by tap, QR, or a five-character
 room code.
 
 ### Scope of v1
@@ -76,7 +76,10 @@ URL on current Android. Android App Links is the supported path, and it has hard
 preconditions:
 
 - `android:autoVerify="true"` on an `ACTION_VIEW` intent filter for the lobby
-  path.
+  path. That path is `LOBBY_PATH_PREFIX` (`/r/`) from `@tapkart/protocol`, and it
+  is **frozen at the first signed release**: an installed APK verifies the prefix
+  it was built with, so a server that later routes some other path fails
+  silently — the tap opens a browser, and nothing logs an error anywhere.
 - `/.well-known/assetlinks.json` served over HTTPS, `Content-Type:
   application/json`, **no redirects**.
 - `sha256_cert_fingerprints` matching the certificate that actually signed the
@@ -107,8 +110,17 @@ APK also verifies during development.
 - iPhone background reading of *emulated* tags is good but not universal across
   models and OS versions.
 
-Because of those last two, **QR and a four-character room code are always
+Because of those last two, **QR and a five-character room code are always
 displayed alongside** the NFC invite. Nobody is ever blocked from joining.
+
+*Amended 2026-08-14 (Plan 2 Task 15c): four characters became five.* The code is
+drawn from a 32-symbol alphabet, so four is a keyspace of 32⁴ ≈ 1.05 M — small
+enough for one host to sweep inside the ten minutes a room lives, and IP-keyed
+rate limiting cannot be relied on to stop it, because a Cloudflare Tunnel
+presents every request as one TCP peer. 32⁵ ≈ 33.5 M is 32× the space for one
+more typed character. The alphabet, the length and the `/r/` lobby path prefix
+are exported from `@tapkart/protocol`, which is the one package `game`, `server`
+and the invite path all depend on.
 
 ---
 
@@ -414,21 +426,49 @@ components, and entities are *interpolated* rather than predicted — per-axis
 velocity is precisely what makes that interpolation good. Split into
 `velocity 3×u12` + `heading u12`. Costs ~4 B per live entity, capped at 32.
 
-Header: `tick u32`, `eventSeq u32`, per-player `lastProcessedInputTick` (8 ×
-u16), entity count u8 ≈ 25 B.
+Header, **202 bits**:
+
+| Field | Bits |
+|---|---|
+| tick | 32 |
+| eventSeq | 32 |
+| **race phase** | **2** |
+| per-player `lastProcessedInputTick` | 8 × 16 |
+| entity count | 8 |
+| **total** | **202 bits** |
+
+*The `race phase` row was added 2026-08-14 (Plan 2 Task 15c).* Without it a guest
+could never be told the race had **not** started: `ClientLoop` forced
+`phase = 'racing'` at construction because the wire carried no answer, so every
+guest drove away while the host was still counting down, and every snapshot in
+that window was a guaranteed correction. Two bits, `'countdown' | 'racing' |
+'finished'`.
+
+It is in the **header**, once per snapshot, and deliberately **not** a 23rd row
+of the per-kart table: that table's stated invariant is that it is a complete
+projection of `SimState`'s *kart* struct, and `phase` is not on the kart struct.
+Encoding it per kart would also put eight copies of one global value on the wire
+— a format capable of expressing eight karts disagreeing about whether the race
+has started.
 
 **Bandwidth, recomputed honestly:**
 
 | | Typical (6 entities) | Worst case (32 entities) |
 |---|---|---|
-| Snapshot size | ~304 B | ~743 B |
+| Snapshot size | ~305 B | ~744 B |
 | Down per client @20Hz | ~6.1 KB/s | ~14.9 KB/s |
 | Host up (8 peers + shadow) | ~55 KB/s | ~134 KB/s |
 
 *Recomputed 2026-08-14 from the bit counts rather than from rounded byte figures:
-`8 × 178` bits of karts + `135` bits per live entity + a `200`-bit header, all in
+`8 × 178` bits of karts + `135` bits per live entity + a `202`-bit header, all in
 one continuously bit-packed stream with no per-record padding. Typical is
-`2434 bits ≈ 304 B`; worst case is `5944 bits ≈ 743 B`.*
+`2436 bits ≈ 305 B`; worst case is `5946 bits ≈ 744 B`.*
+
+*Recomputed again for the 2-bit phase field: the raw totals moved by two bits
+(2434 → 2436 and 5944 → 5946) and both byte figures round up by one (304 → 305,
+743 → 744). Every KB/s figure below is unchanged to the tenth: 305 B × 20Hz is
+6.1 KB/s down per client, and × 9 recipients is 54.9 KB/s up at the host, against
+744 B × 20 × 9 = 134 KB/s worst case.*
 
 *The worst case is up from ~110 KB/s to ~134 KB/s on the host's uplink. That is
 still inside what wifi and LTE carry comfortably, and it only occurs with all 32
@@ -475,6 +515,73 @@ otherwise quantization noise alone triggers a correction every single snapshot
 and the kart visibly buzzes. The epsilon constants and the quantization
 constants live together in `protocol` and are asserted against each other in
 tests.
+
+**Three amendments from implementation, 2026-08-14.** All three were measured,
+not reasoned, and each replaces a sentence above that is wrong in a way only
+running code exposes.
+
+*First: the client predicts on the **wire form** of its own intent.* `encodeInput`
+quantizes `steer` to 8 bits and `accel` to 6. A client that predicts using its raw
+analog input is simulating an input the authority never receives, and the
+resulting divergence is not noise — measured at **186 corrections per 600 ticks**,
+against 1 for the wire form. The client sends the raw intent and predicts on
+`decode(encode(raw))`, which is bit-identically what the authority decodes. It
+banks the wire form in its ring, so replay reproduces the input the simulation
+actually consumed.
+
+*Second: "resets to the authoritative value" is **per field, with the epsilon as a
+dead band**.* A field already agreeing within its epsilon keeps the client's
+full-precision predicted value; only fields that exceed their epsilon are
+overwritten. This is not a relaxation, it is the more accurate operation: a wire
+value carries up to half a quantization step of error, so overwriting an agreeing
+field trades a good estimate for a worse one, and the injected residual then
+integrates. (The information-theoretically optimal switch point is nearer one full
+step than one epsilon; epsilon is chosen because it is the constant the contract
+already blesses, and it is strictly better than no dead band.)
+
+*Third, and the one that matters most: **a literal "zero corrections end to end" is
+unreachable, and the spec never actually asked for it.*** Velocity crosses the wire
+in 12 bits, so a rebase lands within half a step — 0.0156 m/s — of the authority's
+true value, which is about a third of `EPS.velocity` and therefore invisible to
+every later comparison. The simulation has no absolute-position feedback term, so
+that residual integrates into position without bound and crosses `EPS.position`
+in roughly three seconds. Heading is worse: a sub-epsilon 0.0024 rad error at
+20 m/s is 0.048 m/s of lateral drift, one second to cross. **Once a client has
+corrected even once — and the startup transient guarantees it, before the
+authority has received any input at all — it is on a permanently offset
+trajectory.** Measured across 20 transport seeds: 1–2 corrections per 600-tick
+window, never zero.
+
+Section 8's assertion is unaffected, because it asks about *quantization noise*
+specifically, and names its own purpose: catching an epsilon set below its
+quantization step. That is tested against a mirrored authority where quantization
+is the only difference between the two simulations — where the zero is exact, and
+where setting `EPS.position` below its step turns it into 296. The end-to-end
+figure is a separate, composite measurement with a documented bound.
+
+**A consequence that is not a defect but must not be discovered on a phone:** under
+input that *changes* — which is all real driving — corrections rise to roughly
+three per second (measured: 1 held-steady, 29 under a sine, 39 under a square wave,
+per 600 ticks). This is not a client-side omission; predicting against the intent
+the authority is holding was implemented and measured to change nothing. It falls
+out of this section's own rule that the authority applies the newest intent it has
+*received* at its own tick, rather than buffering inputs by the tick they were
+stamped for. Under jitter, which intent is newest at authority-tick T is a fact
+about packet delivery that no client can predict.
+
+The alternative — a tick-buffered authority with a playout delay — trades this for
+added input latency on every control, on a touchscreen arcade racer where input
+latency is the thing players feel first. **We keep immediate application and
+absorb the corrections in rendering**: corrections are small (they fire just past
+`EPS.position`, ~5 cm, against 33 cm of travel per tick at speed), so `render`
+eases the visual offset to zero rather than snapping the kart. Error smoothing is
+therefore a *required* part of the render layer, not a polish item — it is what
+makes this trade honest.
+
+Remote karts and all world entities are not predicted. They are buffered and
+rendered approximately 100ms in the past with interpolation, extrapolating
+briefly and with a hard cap when the buffer starves.
+
 
 Remote karts and all world entities are not predicted. They are buffered and
 rendered approximately 100ms in the past with interpolation, extrapolating
@@ -564,8 +671,9 @@ sent periodically in the steady state.
 
 ### Session lifecycle
 
-1. Host creates a room. Server mints a four-character code and a URL, and starts
-   a shadow loop.
+1. Host creates a room. Server mints a five-character code (`ROOM_CODE_ALPHABET`,
+   `ROOM_CODE_LENGTH`, both from `@tapkart/protocol`) and a URL under
+   `LOBBY_PATH_PREFIX` (`/r/`), and starts a shadow loop.
 2. Host advertises the URL over HCE, and displays the QR code and the room code.
 3. Guest arrives by tap, scan, or typed code and hits the signaling endpoint.
 4. Offer/answer exchange through the server; DataChannel comes up. The guest's
