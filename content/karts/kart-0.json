@@ -1,0 +1,26 @@
+{
+  "id": "alder",
+  "name": "Alder",
+  "chassisLength": 2.05,
+  "chassisWidth": 1.25,
+  "chassisHeight": 0.5,
+  "wheelRadius": 0.3,
+  "wheelWidth": 0.2,
+  "palette": {
+    "body": [
+      0.45,
+      0.02,
+      0.03
+    ],
+    "trim": [
+      0.04,
+      0.04,
+      0.05
+    ],
+    "wheel": [
+      0.02,
+      0.02,
+      0.02
+    ]
+  }
+}

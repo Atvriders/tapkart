@@ -1,0 +1,26 @@
+{
+  "id": "hexwave",
+  "name": "Hexwave",
+  "chassisLength": 2.05,
+  "chassisWidth": 1.25,
+  "chassisHeight": 0.55,
+  "wheelRadius": 0.32,
+  "wheelWidth": 0.22,
+  "palette": {
+    "body": [
+      0.85,
+      0.02,
+      0.65
+    ],
+    "trim": [
+      0.18,
+      0.04,
+      0.14
+    ],
+    "wheel": [
+      0.03,
+      0.03,
+      0.03
+    ]
+  }
+}

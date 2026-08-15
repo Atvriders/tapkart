@@ -1,0 +1,26 @@
+{
+  "id": "dusk-charger",
+  "name": "Dusk Charger",
+  "chassisLength": 2.4,
+  "chassisWidth": 1.48,
+  "chassisHeight": 0.62,
+  "wheelRadius": 0.36,
+  "wheelWidth": 0.26,
+  "palette": {
+    "body": [
+      0.04,
+      0.07,
+      0.62
+    ],
+    "trim": [
+      0.55,
+      0.75,
+      0.95
+    ],
+    "wheel": [
+      0.02,
+      0.02,
+      0.02
+    ]
+  }
+}

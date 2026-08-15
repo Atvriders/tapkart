@@ -1,0 +1,26 @@
+{
+  "id": "glimmer",
+  "name": "Glimmer",
+  "chassisLength": 1.42,
+  "chassisWidth": 0.92,
+  "chassisHeight": 0.32,
+  "wheelRadius": 0.21,
+  "wheelWidth": 0.12,
+  "palette": {
+    "body": [
+      0.52,
+      0.78,
+      0.82
+    ],
+    "trim": [
+      0.86,
+      0.9,
+      0.92
+    ],
+    "wheel": [
+      0.02,
+      0.02,
+      0.02
+    ]
+  }
+}

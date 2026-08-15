@@ -1,0 +1,25 @@
+{
+  "id": "cora-vex",
+  "name": "Cora Vex",
+  "bodyHeight": 0.82,
+  "bodyRadius": 0.33,
+  "headRadius": 0.19,
+  "palette": {
+    "primary": [
+      0,
+      0.54,
+      0.49
+    ],
+    "secondary": [
+      0.03,
+      0.22,
+      0.23
+    ],
+    "accent": [
+      1,
+      0.72,
+      0.12
+    ]
+  },
+  "silhouette": "compact"
+}

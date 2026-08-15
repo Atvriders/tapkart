@@ -1,0 +1,26 @@
+{
+  "id": "cinder-dart",
+  "name": "Cinder Dart",
+  "chassisLength": 1.78,
+  "chassisWidth": 1.08,
+  "chassisHeight": 0.48,
+  "wheelRadius": 0.31,
+  "wheelWidth": 0.17,
+  "palette": {
+    "body": [
+      0,
+      0.45,
+      0.42
+    ],
+    "trim": [
+      0.6,
+      1,
+      0.9
+    ],
+    "wheel": [
+      0.03,
+      0.03,
+      0.03
+    ]
+  }
+}
