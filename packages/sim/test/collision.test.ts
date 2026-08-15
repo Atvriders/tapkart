@@ -71,6 +71,11 @@ function makeSimState(): SimState {
     itemBoxes: [],
     // Contract §0: finishedOrder is fixed length MAX_KARTS, unused slots hold -1.
     finishedOrder: new Array<number>(MAX_KARTS).fill(-1),
+    // Plan 2 Task 1: SimState.heldBotIntent / heldBotTick, neutral and untouched.
+    heldBotIntent: Array.from({ length: MAX_KARTS }, () => (
+      { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    )),
+    heldBotTick: new Array<number>(MAX_KARTS).fill(-1),
   }
 }
 

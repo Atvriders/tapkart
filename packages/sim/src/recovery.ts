@@ -46,9 +46,12 @@ export function surfaceSpeedFactor(k: KartState, t: Tuning): number {
  *
  * Refused outright while the kart is invulnerable or respawning, and it never
  * shortens a spin already running. The `'spinOut'` event is emitted only when
- * the timer actually changes, so counting events counts real spin-outs.
+ * the timer actually changes AND the caller is the leader (Plan 2 Task 2), so
+ * counting events on a leader counts real spin-outs; a follower spins the kart
+ * out identically and announces nothing.
  */
 export function startSpinOut(
+  ctx: SimContext,
   state: SimState,
   k: KartState,
   ticks: number,
@@ -63,7 +66,7 @@ export function startSpinOut(
   k.drift.dir = 0
   k.drift.charge = 0
   k.boostTicks = 0
-  emit(state, events, 'spinOut', k.playerId, -1, 'none', ticks)
+  if (ctx.isLeader) emit(state, events, 'spinOut', k.playerId, -1, 'none', ticks)
 }
 
 /**
@@ -159,7 +162,8 @@ function beginRespawn(
   k.angularVelocity = 0
   k.airborne = false
   k.respawnTicks = t.respawnTicks > 0 ? t.respawnTicks : 0
-  emit(state, events, 'respawn', k.playerId, -1, 'none', k.respawnTicks)
+  // A non-leader never emits (contract §0); the respawn still happened.
+  if (ctx.isLeader) emit(state, events, 'respawn', k.playerId, -1, 'none', k.respawnTicks)
   if (k.respawnTicks === 0) {
     snapToCheckpoint(ctx, k)
     k.invulnTicks = t.invulnTicks

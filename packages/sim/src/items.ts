@@ -240,7 +240,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x + fx * ITEM_FIRE_OFFSET
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z + fz * ITEM_FIRE_OFFSET
-    const id = spawnEntity(state, 'seeker', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'seeker', k.playerId, spawnPosScratch, k.heading,
       seekerTargetFor(state, k.playerId), t.entityTtl, events)
     setEntityVelocity(state, id, fx * t.seekerSpeed, fz * t.seekerSpeed)
     return
@@ -250,7 +250,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x + fx * ITEM_FIRE_OFFSET
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z + fz * ITEM_FIRE_OFFSET
-    const id = spawnEntity(state, 'bolt', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'bolt', k.playerId, spawnPosScratch, k.heading,
       -1, t.entityTtl, events)
     setEntityVelocity(state, id, fx * t.boltSpeed, fz * t.boltSpeed)
     return
@@ -260,7 +260,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x - fx * ITEM_DROP_OFFSET
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z - fz * ITEM_DROP_OFFSET
-    const id = spawnEntity(state, 'slick', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'slick', k.playerId, spawnPosScratch, k.heading,
       -1, t.entityTtl, events)
     setEntityVelocity(state, id, 0, 0)
     return
@@ -270,7 +270,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z
-    const id = spawnEntity(state, 'bubble', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'bubble', k.playerId, spawnPosScratch, k.heading,
       k.playerId, t.entityTtl, events)
     setEntityVelocity(state, id, 0, 0)
     if (id !== -1) k.shielded = true
@@ -281,7 +281,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z
-    const id = spawnEntity(state, 'surge', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'surge', k.playerId, spawnPosScratch, k.heading,
       -1, SURGE_TTL_TICKS, events)
     setEntityVelocity(state, id, 0, 0)
     return
@@ -291,7 +291,7 @@ export function useItem(ctx: SimContext, state: SimState, k: KartState, events: 
     spawnPosScratch.x = k.position.x
     spawnPosScratch.y = k.position.y
     spawnPosScratch.z = k.position.z
-    const id = spawnEntity(state, 'charge', k.playerId, spawnPosScratch, k.heading,
+    const id = spawnEntity(ctx, state, 'charge', k.playerId, spawnPosScratch, k.heading,
       -1, CHARGE_TTL_TICKS, events)
     setEntityVelocity(state, id, 0, 0)
   }

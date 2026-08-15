@@ -1,0 +1,1303 @@
+{
+  "formatVersion": 1,
+  "generatedBy": "UPDATE_GOLDEN=1 npx vitest run packages/net/test/golden-net-regen.test.ts",
+  "trackId": "oval",
+  "raceSeed": 539363348,
+  "characterIdx": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "drivenPlayerId": 0,
+  "tickCount": 1200,
+  "intentScale": 10000,
+  "transport": {
+    "latencyMs": 150,
+    "jitterMs": 50,
+    "lossRate": 0.05,
+    "hostClientSeed": 12648430,
+    "hostShadowSeed": 6221057,
+    "clientShadowSeed": 6221058
+  },
+  "intentsB64": [
+    "ECcQJwAQJxAnABAnECcAECcQJwAQJxAnABAnECcAECcQJwAQJxAnABAnECcAECcQJwAQJxAnABAnECcAECcQJwAQJxAnABAnECcAECcQJwC/JhAnAL8mECcA",
+    "kiUQJwCSJRAnAF0kECcAXSQQJwAeIxAnAB4jECcAzyEQJwDPIRAnAHUgECcAdSAQJwANHxAnAA0fECcAmh0QJwCaHRAnALYbECcAthsQJwDGGRAnAMYZECcA",
+    "2BcQJwDYFxAnAN8VECcA3xUQJwDmExAnAOYTECcA5xEQJwDnERAnAOkPECcA6Q8QJwD0DRAnAPQNECcABAwQJwAEDBAnAB0KECcAHQoQJwAzCBAnADMIECcA",
+    "XwYQJwBfBhAnAKEEECcAoQQQJwD0AhAnAPQCECcASgEQJwBKARAnAJ8AECcAnwAQJwAMABAnAAwAECcAh/8QJwCH/xAnAA//ECcAD/8QJwCm/hAnAKb+ECcA",
+    "RP4QJwBE/hAnAOb9ECcA5v0QJwCa/RAnAJr9ECcAUv0QJwBS/RAnAA39ECcADf0QJwDQ/BAnAND8ECcAnPwQJwCc/BAnAG78ECcAbvwQJwBD/BAnAEP8ECcA",
+    "G/wQJwAb/BAnAET7ECcARPsQJwB6+hAnAHr6ECcAu/kQJwC7+RAnAAb5ECcABvkQJwBb+BAnAFv4ECcAufcQJwC59xAnAB/3ECcAH/cQJwCU9hAnAJT2ECcA",
+    "JPYQJwAk9hAnAM/1ECcAz/UQJwCH9RAnAIf1ECcATfUQJwBN9RAnACX1ECcAJfUQJwAT9RAnABP1ECcAEfUQJwAR9RAnAP/0ECcA//QQJwAE9RAnAAT1ECcA",
+    "FvUQJwAW9RAnADT1ECcANPUQJwBj9RAnAGP1ECcAnfUQJwCd9RAnAOP1ECcA4/UQJwA09hAnADT2ECcAkfYQJwCR9hAnAPr2ECcA+vYQJwBu9xAnAG73ECcA",
+    "5vcQJwDm9xAnAGb4ECcAZvgQJwDx+BAnAPH4ECcAgvkQJwCC+RAnAET6ECcARPoQJwAH+xAnAAf7ECcAzvsQJwDO+xAnAJP8ECcAk/wQJwBa/RAnAFr9ECcA",
+    "Jf4QJwAl/hAnAPT+ECcA9P4QJwC4/xAnALj/ECcAbgAQJwBuABAnAB0BECcAHQEQJwDEARAnAMQBECcAaAIQJwBoAhAnAA0DECcADQMQJwCdAxAnAJ0DECcA",
+    "HgQQJwAeBBAnAJsEECcAmwQQJwAHBRAnAAcFECcAaAUQJwBoBRAnAL0FECcAvQUQJwAJBhAnAAkGECcARwYQJwBHBhAnAHcGECcAdwYQJwCYBhAnAJgGECcA",
+    "rwYQJwCvBhAnALoGECcAugYQJwC9BhAnAL0GECcAtgYQJwC2BhAnAKYGECcApgYQJwCJBhAnAIkGECcAZAYQJwBkBhAnAF8GECcAXwYQJwBTBhAnAFMGECcA",
+    "QAYQJwBABhAnACYGECcAJgYQJwAFBhAnAAUGECcA3QUQJwDdBRAnALAFECcAsAUQJwB/BRAnAH8FECcARwUQJwBHBRAnAAkFECcACQUQJwDEBBAnAMQEECcA",
+    "egQQJwB6BBAnAC0EECcALQQQJwDeAxAnAN4DECcAjgMQJwCOAxAnAD0DECcAPQMQJwDsAhAnAOwCECcAmAIQJwCYAhAnAEACECcAQAIQJwDsARAnAOwBECcA",
+    "mQEQJwCZARAnAEgBECcASAEQJwD1ABAnAPUAECcAowAQJwCjABAnAFMAECcAUwAQJwAFABAnAAUAECcAuf8QJwC5/xAnAHL/ECcAcv8QJwAr/xAnACv/ECcA",
+    "6P4QJwDo/hAnADz+ECcAPP4QJwCS/RAnAJL9ECcA5vwQJwDm/BAnAD/8ECcAP/wQJwCe+xAnAJ77ECcACPsQJwAI+xAnAHP6ECcAc/oQJwDr+RAnAOv5ECcA",
+    "cfkQJwBx+RAnAA/5ECcAD/kQJwC8+BAnALz4ECcAdPgQJwB0+BAnADz4ECcAPPgQJwAW+BAnABb4ECcA/PcQJwD89xAnAD74ECcAPvgQJwCO+BAnAI74ECcA",
+    "6PgQJwDo+BAnAFL5ECcAUvkQJwDD+RAnAMP5ECcAQvoQJwBC+hAnAMj6ECcAyPoQJwBX+xAnAFf7ECcA5vsQJwDm+xAnAGn8ECcAafwQJwDv/BAnAO/8ECcA",
+    "ev0QJwB6/RAnAAv+ECcAC/4QJwCb/hAnAJv+ECcAIf8QJwAh/xAnAKT/ECcApP8QJwAgABAnACAAECcAmwAQJwCbABAnABYBECcAFgEQJwCLARAnAIsBECcA",
+    "+wEQJwD7ARAnAGkCECcAaQIQJwDSAhAnANICECcAMgMQJwAyAxAnAIwDECcAjAMQJwDgAxAnAOADECcAKwQQJwArBBAnAHQEECcAdAQQJwC1BBAnALUEECcA",
+    "8QQQJwDxBBAnALwEECcAvAQQJwB9BBAnAH0EECcAMwQQJwAzBBAnANwDECcA3AMQJwB9AxAnAH0DECcAGAMQJwAYAxAnAKcCECcApwIQJwA2AhAnADYCECcA",
+    "xQEQJwDFARAnAFEBECcAUQEQJwDjABAnAOMAECcAcwAQJwBzABAnAAMAECcAAwAQJwCa/xAnAJr/ECcAM/8QJwAz/xAnAOP+ECcA4/4QJwCY/hAnAJj+ECcA",
+    "U/4QJwBT/hAnABL+ECcAEv4QJwDX/RAnANf9ECcAof0QJwCh/RAnAHP9ECcAc/0QJwBH/RAnAEf9ECcAHP0QJwAc/RAnAP/8ECcA//wQJwDo/BAnAOj8ECcA",
+    "1fwQJwDV/BAnAMX8ECcAxfwQJwC5/BAnALn8ECcAtfwQJwC1/BAnAEf9ECcAR/0QJwDe/RAnAN79ECcAfP4QJwB8/hAnABz/ECcAHP8QJwDA/xAnAMD/ECcA",
+    "ZwAQJwBnABAnABEBECcAEQEQJwC2ARAnALYBECcAUwIQJwBTAhAnAO4CECcA7gIQJwB8AxAnAHwDECcAAgQQJwACBBAnAIMEECcAgwQQJwD7BBAnAPsEECcA",
+    "aQUQJwBpBRAnAFQFECcAVAUQJwAvBRAnAC8FECcAAgUQJwACBRAnAM4EECcAzgQQJwCOBBAnAI4EECcAQAQQJwBABBAnAOcDECcA5wMQJwCKAxAnAIoDECcA",
+    "KwMQJwArAxAnAMcCECcAxwIQJwBgAhAnAGACECcA+wEQJwD7ARAnAJYBECcAlgEQJwAxARAnADEBECcAzAAQJwDMABAnADsAECcAOwAQJwCo/xAnAKj/ECcA",
+    "HP8QJwAc/xAnAI3+ECcAjf4QJwD7/RAnAPv9ECcAb/0QJwBv/RAnAOr8ECcA6vwQJwBs/BAnAGz8ECcA+fsQJwD5+xAnAIf7ECcAh/sQJwAZ+xAnABn7ECcA",
+    "tfoQJwC1+hAnAGH6ECcAYfoQJwAY+hAnABj6ECcA2/kQJwDb+RAnAOT5ECcA5PkQJwD4+RAnAPj5ECcAFvoQJwAW+hAnADz6ECcAPPoQJwBq+hAnAGr6ECcA",
+    "ovoQJwCi+hAnAOj6ECcA6PoQJwAu+xAnAC77ECcAevsQJwB6+xAnAMz7ECcAzPsQJwAj/BAnACP8ECcAffwQJwB9/BAnANj8ECcA2PwQJwAy/RAnADL9ECcA",
+    "jP0QJwCM/RAnAHb+ECcAdv4QJwBg/xAnAGD/ECcATQAQJwBNABAnADcBECcANwEQJwAjAhAnACMCECcADwMQJwAPAxAnAPUDECcA9QMQJwDNBBAnAM0EECcA",
+    "oAUQJwCgBRAnAGcGECcAZwYQJwAvBxAnAC8HECcA6QcQJwDpBxAnAIUIECcAhQgQJwAZCRAnABkJECcAnAkQJwCcCRAnAGAJECcAYAkQJwAUCRAnABQJECcA",
+    "twgQJwC3CBAnAFAIECcAUAgQJwDZBxAnANkHECcAUwcQJwBTBxAnALsGECcAuwYQJwAaBhAnABoGECcAfAUQJwB8BRAnANsEECcA2wQQJwA6BBAnADoEECcA",
+    "mAMQJwCYAxAnAPoCECcA+gIQJwBgAhAnAGACECcAzAEQJwDMARAnAHcBECcAdwEQJwAqARAnACoBECcA6AAQJwDoABAnAKoAECcAqgAQJwB7ABAnAHsAECcA",
+    "UAAQJwBQABAnADYAECcANgAQJwAjABAnACMAECcAGgAQJwAaABAnABcAECcAFwAQJwAcABAnABwAECcAKgAQJwAqABAnAD0AECcAPQAQJwBaABAnAFoAECcA",
+    "gAAQJwCAABAnAAkAECcACQAQJwCX/xAnAJf/ECcAKf8QJwAp/xAnAL/+ECcAv/4QJwBZ/hAnAFn+ECcA9f0QJwD1/RAnAJf9ECcAl/0QJwBK/RAnAEr9ECcA",
+    "CP0QJwAI/RAnANT8ECcA1PwQJwCv/BAnAK/8ECcAm/wQJwCb/BAnAJn8ECcAmfwQJwCt/BAnAK38ECcA0PwQJwDQ/BAnAHz9ECcAfP0QJwA7/hAnADv+ECcA",
+    "Cf8QJwAJ/xAnAO7/ECcA7v8QJwDlABAnAOUAECcA6wEQJwDrARAnAAQDECcCBAMQJwInBBAnAicEECcCUAUQJwJQBRAnAokGECcCiQYQJwLCBxAnAsIHECcC",
+    "/wgQJwL/CBAnAjoKECcCOgoQJwJ/CxAnAn8LECcCuAwQJwK4DBAnAmIOECcCYg4QJwL4DxAnAvgPECcCjBEQJwKMERAnAhETECcCERMQJwKPFBAnBo8UECcG",
+    "8BUQJwbwFRAnBjsXECcGOxcQJwZgGBAnBmAYECcGeRkQJwZ5GRAnBnwaECcGfBoQJwZgGxAnAmAbECcCOxwQJwI7HBAnAvkcECcC+RwQJwKiHRAnAqIdECcC",
+    "Ph4QJwI+HhAnAtodECcC2h0QJwJjHRAnAmMdECcC0hwQJwLSHBAnAi0cECcCLRwQJwJ4GxAnAngbECcCsRoQJwKxGhAnAtgZECcC2BkQJwL4GBAnAvgYECcC",
+    "GBgQJwIYGBAnAjwXECcCPBcQJwJoFhAnAmgWECcCjhUQJwKOFRAnArMUECcCsxQQJwLcExAnAtwTECcCEBMQJwIQExAnAswSECcCzBIQJwKFEhAnAoUSECcC",
+    "NhIQJwI2EhAnAvARECcC8BEQJwKuERAnAq4RECcCaBEQJwJoERAnAioRECcCKhEQJwLmEBAnAuYQECcCnBAQJwKcEBAnAk4QECcCThAQJwL/DxAnAv8PECcC",
+    "qg8QJwKqDxAnAlUPECcCVQ8QJwL5DhAnAvkOECcCnA4QJwKcDhAnAq8OECcCrw4QJwLBDhAnAsEOECcC1g4QJwLWDhAnAuoOECcC6g4QJwL8DhAnAvwOECcC",
+    "Ew8QJwITDxAnAi8PECcCLw8QJwJJDxAnAkkPECcCXg8QJwJeDxAnAnEPECcCcQ8QJwKBDxAnAoEPECcCjA8QJwKMDxAnApIPECcCkg8QJwKWDxAnApYPECcC",
+    "lg8QJwKWDxAnAu8OECcC7w4QJwJEDhAnAkQOECcClQ0QJwKVDRAnAuIMECcC4gwQJwIqDBAnAioMECcCbwsQJwJvCxAnArQKECcCtAoQJwL5CRAnAvkJECcC",
+    "QgkQJwJCCRAnApEIECcCkQgQJwLfBxAnAt8HECcCOgcQJwI6BxAnAp0GECcCnQYQJwILBhAnAgsGECcCfwUQJwJ/BRAnAs0EECcCzQQQJwIfBBAnAh8EECcC",
+    "dAMQJwJ0AxAnAtECECcC0QIQJwI2AhAnAjYCECcCqgEQJwKqARAnAigBECcCKAEQJwKsABAnAqwAECcCRwAQJwJHABAnAun/ECcC6f8QJwKV/xAnApX/ECcC",
+    "VP8QJwJU/xAnAiT/ECcCJP8QJwL7/hAnAvv+ECcC4f4QJwLh/hAnAqn/ECcCqf8QJwKCABAnAoIAECcCbgEQJwJuARAnAmkCECcCaQIQJwJwAxAnAnADECcC",
+    "iAQQJwKIBBAnAqwFECcCrAUQJwLMBhAnAswGECcC8QcQJwLxBxAnAhMJECcCEwkQJwI5ChAnAjkKECcCUgsQJwJSCxAnAlsMECcCWwwQJwJkDRAnAmQNECcC",
+    "dw4QJwJ3DhAnAi4PECcCLg8QJwLZDxAnAtkPECcCdxAQJwJ3EBAnAg4RECcCDhEQJwKgERAnAqARECcCFRIQJwIVEhAnAoQSECcChBIQJwLsEhAnAuwSECcC",
+    "TRMQJwJNExAnAqATECcCoBMQJwLuExAnAu4TECcCMxQQJwIzFBAnAm0UECcCbRQQJwKlFBAnAqUUECcC1xQQJwLXFBAnAvMUECcC8xQQJwIAFRAnAgAVECcC",
+    "BxUQJwIHFRAnAgkVECcCCRUQJwICFRAnAgIVECcC8BQQJwLwFBAnAtgUECcC2BQQJwK8FBAnArwUECcCnBQQJwKcFBAnAnkUECcCeRQQJwJRFBAnAlEUECcC",
+    "JhQQJwImFBAnAvgTECcC+BMQJwLJExAnAskTECcCmBMQJwKYExAnAvwSECcC/BIQJwJfEhAnAl8SECcCvhEQJwK+ERAnAh0RECcCHREQJwJ1EBAnAnUQECcC",
+    "0A8QJwLQDxAnAicPECcCJw8QJwKCDhAnAoIOECcC2w0QJwLbDRAnAkINECcCQg0QJwKnDBAnAqcMECcCCwwQJwILDBAnAn0LECcCfQsQJwLtChAnAu0KECcC",
+    "ZQoQJwJlChAnAngKECcCeAoQJwKQChAnApAKECcCogoQJwKiChAnAr8KECcCvwoQJwLrChAnAusKECcCGAsQJwIYCxAnAkcLECcCRwsQJwJyCxAnAnILECcC",
+    "nAsQJwKcCxAnAsMLECcCwwsQJwLkCxAnAuQLECcCAQwQJwIBDBAnAhsMECcCGwwQJwI0DBAnAjQMECcCSwwQJwJLDBAnApkLECcCmQsQJwLiChAnAuIKECcC",
+    "KwoQJwIrChAnAnIJECcCcgkQJwK3CBAnArcIECcC/QcQJwL9BxAnAj8HECcCPwcQJwKSBhAnApIGECcC7AUQJwLsBRAnAkoFECcCSgUQJwK4BBAnArgEECcC",
+    "LAQQJwIsBBAnAqgDECcCqAMQJwIzAxAnAjMDECcCyAIQJwLIAhAnAhIDECcCEgMQJwJmAxAnAmYDECcC0AMQJwLQAxAnAkwEECcCTAQQJwLVBBAnAtUEECcC",
+    "dQUQJwJ1BRAnAh8GECcCHwYQJwLRBhAnAtEGECcCiwcQJwKLBxAnAkwIECcCTAgQJwIMCRAnAgwJECcC0AkQJwLQCRAnAo8KECcCjwoQJwJKCxAnAkoLECcC",
+    "BgwQJwIGDBAnAn8MECcCfwwQJwLwDBAnAvAMECcCYQ0QJwJhDRAnAs4NECcCzg0QJwIwDhAnAjAOECcChQ4QJwKFDhAnAssOECcCyw4QJwINDxAnAg0PECcC",
+    "RA8QJwJEDxAnAnEPECcCcQ8QJwKODxAnAo4PECcCog8QJwKiDxAnAq0PECcArQ8QJwCtDxAnAK0PECcAog8QJwCiDxAnANAPECcA0A8QJwDzDxAnAPMPECcA",
+    "CRAQJwAJEBAnABMQECcAExAQJwDbDxAnANsPECcAfw8QJwB/DxAnAAkPECcACQ8QJwCADhAnAIAOECcA5g0QJwDmDRAnAD8NECcAPw0QJwCQDBAnAJAMECcA",
+    "1wsQJwDXCxAnABgLECcAGAsQJwBOChAnAE4KECcAfwkQJwB/CRAnAN8IECcA3wgQJwA9CBAnAD0IECcAmAcQJwCYBxAnAPgGECcA+AYQJwBkBhAnAGQGECcA",
+    "1gUQJwDWBRAnAEoFECcASgUQJwDRBBAnANEEECcAYQQQJwBhBBAnAPIDECcA8gMQJwCCAxAnAIIDECcAFAMQJwAUAxAnAKMCECcAowIQJwAzAhAnADMCECcA",
+    "zAEQJwDMARAnAB4BECcAHgEQJwBwABAnAHAAECcAwf8QJwDB/xAnABL/ECcAEv8QJwBu/hAnAG7+ECcAz/0QJwDP/RAnADL9ECcAMv0QJwCp/BAnAKn8ECcA",
+    "KPwQJwAo/BAnAK/7ECcAr/sQJwA7+xAnADv7ECcA2foQJwDZ+hAnAIX6ECcAhfoQJwA2+hAnADb6ECcA"
+  ],
+  "counters": {
+    "corrections": 308,
+    "snapshotsToClient": 373,
+    "snapshotsToShadow": 383,
+    "eventDatagramsToClient": 23,
+    "eventDatagramsToShadow": 23,
+    "droppedHost": 0,
+    "droppedClient": 0,
+    "droppedShadow": 0,
+    "hostEventSeq": 34,
+    "clientEventSeq": 34,
+    "shadowEventSeq": 34
+  },
+  "host": {
+    "tick": 1200,
+    "phase": "racing",
+    "raceSeed": 539363348,
+    "rngCursor": 2,
+    "nextEventSeq": 34,
+    "finishTick": -1,
+    "entityCount": 2,
+    "nextEntityId": 3,
+    "finishedOrder": [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    "itemBoxes": [
+      {
+        "boxIdx": 0,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 1,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 2,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 3,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 4,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 5,
+        "respawnTicks": 0
+      }
+    ],
+    "karts": [
+      {
+        "playerId": 0,
+        "characterIdx": 0,
+        "isBot": false,
+        "connected": true,
+        "position": [
+          153.77446537921864,
+          0,
+          100.99443958701167
+        ],
+        "velocity": [
+          -47.183674352901996,
+          0,
+          -6.2717277409207215
+        ],
+        "heading": -3.0137117274464114,
+        "angularVelocity": -0.09635294117647063,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.25915149343911725
+        }
+      },
+      {
+        "playerId": 1,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          136.58040774870807,
+          0,
+          96.81659330661974
+        ],
+        "velocity": [
+          -39.741817235167915,
+          0,
+          -1.4973938287760213
+        ],
+        "heading": -3.118134882738606,
+        "angularVelocity": -0.2744381210685374,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.35594652672630644
+        }
+      },
+      {
+        "playerId": 2,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          276.3520681358083,
+          -0.8649945178131352,
+          70.76420754351291
+        ],
+        "velocity": [
+          -26.63869673335056,
+          0,
+          30.026565265540217
+        ],
+        "heading": 2.38000459785165,
+        "angularVelocity": 0.2243587471760998,
+        "drift": {
+          "active": true,
+          "dir": 1,
+          "charge": 150
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.5391884299489709
+        }
+      },
+      {
+        "playerId": 3,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          214.3253583666578,
+          -0.04826537570942101,
+          99.56983563427224
+        ],
+        "velocity": [
+          -48.16360859001528,
+          0,
+          -0.7174565180817593
+        ],
+        "heading": -3.1170380973766894,
+        "angularVelocity": 0.1256494367696088,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 45,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.9201251692492018
+        }
+      },
+      {
+        "playerId": 4,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          227.08516918396302,
+          -0.283642916324804,
+          -99.34822527972602
+        ],
+        "velocity": [
+          1.9597881376629591,
+          0,
+          -1.5446769815693824
+        ],
+        "heading": -0.1976473562766776,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 32,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.39092941818867555
+        }
+      },
+      {
+        "playerId": 5,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          184.4691057698483,
+          0,
+          96.61417513379519
+        ],
+        "velocity": [
+          -53.9286449516367,
+          0,
+          -2.7957289235690403
+        ],
+        "heading": -3.083522098769987,
+        "angularVelocity": 0.10523256117898452,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 13,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.08653546953749114
+        }
+      },
+      {
+        "playerId": 6,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          223.53690451067757,
+          -0.20098721102766223,
+          99.59632037765002
+        ],
+        "velocity": [
+          -43.04004045725804,
+          0,
+          5.972364597769221
+        ],
+        "heading": 3.03216505703169,
+        "angularVelocity": 0.34093745051518654,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 57,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.869903078774628
+        }
+      },
+      {
+        "playerId": 7,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          222.60380488939893,
+          -0.39476778408543667,
+          102.84769005355386
+        ],
+        "velocity": [
+          -43.947490930443095,
+          0,
+          3.9284414772418916
+        ],
+        "heading": 3.0851233344947078,
+        "angularVelocity": 0.487775047920261,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 55,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.8782260261143398
+        }
+      }
+    ],
+    "entities": [
+      {
+        "entityId": 1,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          232.649325539428,
+          -0.3694720562249468,
+          -97.39125807112184
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.1714206385567038,
+        "targetId": -1,
+        "ttl": 111
+      },
+      {
+        "entityId": 2,
+        "kind": "slick",
+        "ownerId": 2,
+        "position": [
+          225.99053159917034,
+          -0.34229305441741986,
+          -100.18678748752653
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.24810062533705307,
+        "targetId": -1,
+        "ttl": 121
+      }
+    ]
+  },
+  "client": {
+    "tick": 1200,
+    "phase": "racing",
+    "raceSeed": 0,
+    "rngCursor": 0,
+    "nextEventSeq": 34,
+    "finishTick": -1,
+    "entityCount": 6,
+    "nextEntityId": 7,
+    "finishedOrder": [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    "itemBoxes": [
+      {
+        "boxIdx": 0,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 1,
+        "respawnTicks": 41
+      },
+      {
+        "boxIdx": 2,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 3,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 4,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 5,
+        "respawnTicks": 0
+      }
+    ],
+    "karts": [
+      {
+        "playerId": 0,
+        "characterIdx": 0,
+        "isBot": false,
+        "connected": true,
+        "position": [
+          153.7507477409631,
+          0,
+          101.12527790464945
+        ],
+        "velocity": [
+          -47.30215294588829,
+          0,
+          -5.368695908787721
+        ],
+        "heading": -3.0372241982283796,
+        "angularVelocity": -0.16976470588235298,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.2592730167267998
+        }
+      },
+      {
+        "playerId": 1,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          227.95325538917473,
+          -0.04912867654147695,
+          -96.38456571953091
+        ],
+        "velocity": [
+          -2.3297561887058094,
+          0,
+          -0.8938862472942134
+        ],
+        "heading": -2.305383789445645,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 42,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.39943282543048086
+        }
+      },
+      {
+        "playerId": 2,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          229.58595352643772,
+          -0.2950687011043869,
+          -98.48493341846824
+        ],
+        "velocity": [
+          -2.269352329038071,
+          0,
+          1.0377073424642593
+        ],
+        "heading": -3.1006279479205334,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 46,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.40521429861691427
+        }
+      },
+      {
+        "playerId": 3,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          225.20076444263444,
+          -0.1900746885964201,
+          -98.88184179817783
+        ],
+        "velocity": [
+          -0.4425555019191705,
+          0,
+          -2.455797456965012
+        ],
+        "heading": -1.2792430718236147,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 38,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.38147593401963675
+        }
+      },
+      {
+        "playerId": 4,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          218.22517174188923,
+          -0.2072929742322626,
+          -101.67882138881846
+        ],
+        "velocity": [
+          2.4466468747772065,
+          0,
+          -0.490627753044686
+        ],
+        "heading": 0.2719423396012446,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 40,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.3411444427631065
+        }
+      },
+      {
+        "playerId": 5,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          264.332093839086,
+          -0.5064176457039468,
+          79.6388067668845
+        ],
+        "velocity": [
+          -31.342612683970742,
+          0,
+          25.283692803633624
+        ],
+        "heading": 2.5785230876241556,
+        "angularVelocity": 0.40753074328932454,
+        "drift": {
+          "active": true,
+          "dir": 1,
+          "charge": 150
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.6198844530155099
+        }
+      },
+      {
+        "playerId": 6,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          225.68797843881094,
+          -0.032448290264568254,
+          -96.78806688515024
+        ],
+        "velocity": [
+          2.1924762509151483,
+          0,
+          -1.1915722433355869
+        ],
+        "heading": -0.027977410670085023,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 31,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.3866232635038416
+        }
+      },
+      {
+        "playerId": 7,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          215.79253649495908,
+          -0.22980904445346065,
+          -103.29846641779802
+        ],
+        "velocity": [
+          0.03863499819168281,
+          0,
+          2.4950558829071294
+        ],
+        "heading": 2.025161055064843,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 21,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.3266945287547762
+        }
+      }
+    ],
+    "entities": [
+      {
+        "entityId": 1,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          225.31022605208486,
+          -0.1566203036070018,
+          -97.96853389587869
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.09318119208650247,
+        "targetId": -1,
+        "ttl": 100
+      },
+      {
+        "entityId": 2,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          226.6420746571236,
+          -0.1878271378175235,
+          -97.88390538627156
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.10050027780714643,
+        "targetId": -1,
+        "ttl": 102
+      },
+      {
+        "entityId": 3,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          228.64013544324737,
+          -0.24066296420739475,
+          -97.69492379805774
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.12044689782993867,
+        "targetId": -1,
+        "ttl": 105
+      },
+      {
+        "entityId": 4,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          230.6384318542664,
+          -0.2961490963074865,
+          -97.54229296562231
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.14499658401183657,
+        "targetId": -1,
+        "ttl": 108
+      },
+      {
+        "entityId": 5,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          232.6388453443901,
+          -0.36744580955748585,
+          -97.37716920488674
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.17108062558010362,
+        "targetId": -1,
+        "ttl": 111
+      },
+      {
+        "entityId": 6,
+        "kind": "slick",
+        "ownerId": 2,
+        "position": [
+          213.9224275431278,
+          -0.2835679747050805,
+          -104.78247575749909
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.14218101738528907,
+        "targetId": -1,
+        "ttl": 131
+      }
+    ]
+  },
+  "shadow": {
+    "tick": 1200,
+    "phase": "racing",
+    "raceSeed": 539363348,
+    "rngCursor": 0,
+    "nextEventSeq": 34,
+    "finishTick": -1,
+    "entityCount": 2,
+    "nextEntityId": 2,
+    "finishedOrder": [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    "itemBoxes": [
+      {
+        "boxIdx": 0,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 1,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 2,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 3,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 4,
+        "respawnTicks": 0
+      },
+      {
+        "boxIdx": 5,
+        "respawnTicks": 0
+      }
+    ],
+    "karts": [
+      {
+        "playerId": 0,
+        "characterIdx": 0,
+        "isBot": false,
+        "connected": true,
+        "position": [
+          153.7777472110578,
+          0,
+          101.00301046287719
+        ],
+        "velocity": [
+          -47.17193927909781,
+          0,
+          -6.303955790376115
+        ],
+        "heading": -3.0128251369596577,
+        "angularVelocity": -0.09635294117647063,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.2591323780217527
+        }
+      },
+      {
+        "playerId": 1,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          136.5815919956202,
+          0,
+          96.82030906672078
+        ],
+        "velocity": [
+          -39.7414238759323,
+          0,
+          -1.5072396896757243
+        ],
+        "heading": -3.1178965455849244,
+        "angularVelocity": -0.27453161318644137,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.3559394647025256
+        }
+      },
+      {
+        "playerId": 2,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          276.3413424959002,
+          -0.8653037266370003,
+          70.77793318946792
+        ],
+        "velocity": [
+          -26.641248179238012,
+          0,
+          30.023711263772476
+        ],
+        "heading": 2.3799678547171843,
+        "angularVelocity": 0.2248663010114202,
+        "drift": {
+          "active": true,
+          "dir": 1,
+          "charge": 150
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.5392820273938508
+        }
+      },
+      {
+        "playerId": 3,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          214.32511209972404,
+          -0.047543372988984305,
+          99.55256240201221
+        ],
+        "velocity": [
+          -48.15477838258353,
+          0,
+          -0.7312203165437567
+        ],
+        "heading": -3.1168261378535838,
+        "angularVelocity": 0.12387628001663448,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 45,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.9201133872376914
+        }
+      },
+      {
+        "playerId": 4,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          227.08303219426628,
+          -0.2838233946286174,
+          -99.35122251689674
+        ],
+        "velocity": [
+          1.9594508615953878,
+          0,
+          -1.541269977013543
+        ],
+        "heading": -0.19716466714837041,
+        "angularVelocity": 0,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 32,
+        "invulnTicks": 0,
+        "boostTicks": 0,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 2,
+          "t": 0.3909144255616006
+        }
+      },
+      {
+        "playerId": 5,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          184.47744405958812,
+          0,
+          96.61206255331277
+        ],
+        "velocity": [
+          -53.9291832611576,
+          0,
+          -2.785256161994052
+        ],
+        "heading": -3.083726885016056,
+        "angularVelocity": 0.10544593063882668,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 13,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 4,
+          "t": 0.08648812852697585
+        }
+      },
+      {
+        "playerId": 6,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          223.53924545926506,
+          -0.2013491553096824,
+          99.60055718242052
+        ],
+        "velocity": [
+          -43.04324852363773,
+          0,
+          5.946939859046953
+        ],
+        "heading": 3.0327790401465706,
+        "angularVelocity": 0.3401728035994381,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 57,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.869895145437706
+        }
+      },
+      {
+        "playerId": 7,
+        "characterIdx": 0,
+        "isBot": true,
+        "connected": false,
+        "position": [
+          222.60379290668985,
+          -0.3939136378366022,
+          102.83442902308036
+        ],
+        "velocity": [
+          -43.94972494322271,
+          0,
+          3.9131162490578313
+        ],
+        "heading": 3.0854017538026963,
+        "angularVelocity": 0.48620428848407427,
+        "drift": {
+          "active": false,
+          "dir": 0,
+          "charge": 0
+        },
+        "item": "none",
+        "airborne": false,
+        "surface": "tarmac",
+        "spinOutTicks": 0,
+        "invulnTicks": 0,
+        "boostTicks": 55,
+        "respawnTicks": 0,
+        "shielded": false,
+        "lap": {
+          "lap": 1,
+          "checkpointIdx": 3,
+          "t": 0.8782130106307688
+        }
+      }
+    ],
+    "entities": [
+      {
+        "entityId": 1,
+        "kind": "slick",
+        "ownerId": 0,
+        "position": [
+          232.64417486839102,
+          -0.35938048371099285,
+          -97.3921110856794
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.17108062558010362,
+        "targetId": -1,
+        "ttl": 111
+      },
+      {
+        "entityId": 2,
+        "kind": "slick",
+        "ownerId": 2,
+        "position": [
+          225.98782330052654,
+          -0.3281300068665587,
+          -100.17340352483404
+        ],
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "heading": 0.2477983948985356,
+        "targetId": -1,
+        "ttl": 121
+      }
+    ]
+  }
+}

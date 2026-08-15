@@ -63,14 +63,14 @@ function stubQuery(): TrackQuery {
   }
 }
 
-function makeCtx(overrides?: Partial<Tuning>): SimContext {
+function makeCtx(overrides?: Partial<Tuning>, isLeader = true): SimContext {
   return {
     // Four checkpoints, arc-normalised: 0 m, 100 m, 200 m, 300 m along the stub.
     track: makeStraightTrack({ checkpointS: [0, 0.25, 0.5, 0.75] }),
     query: stubQuery(),
     tuning: makeTuning(overrides),
     characters: makeCharacters(),
-    isLeader: true,
+    isLeader,
   }
 }
 
@@ -133,6 +133,11 @@ function makeSimState(): SimState {
     itemBoxes: [],
     // Contract §0: finishedOrder is fixed length MAX_KARTS, unused slots hold -1.
     finishedOrder: new Array<number>(MAX_KARTS).fill(-1),
+    // Plan 2 Task 1: SimState.heldBotIntent / heldBotTick, neutral and untouched.
+    heldBotIntent: Array.from({ length: MAX_KARTS }, () => (
+      { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    )),
+    heldBotTick: new Array<number>(MAX_KARTS).fill(-1),
   }
 }
 
@@ -259,6 +264,30 @@ describe('respawn', () => {
     expect(events[0].data).toBe(72)
     expect(events[0].eventSeq).toBe(0)
     expect(state.nextEventSeq).toBe(1)
+  })
+
+  it('respawns identically on a follower, but announces nothing', () => {
+    const leaderCtx = makeCtx()
+    const followerCtx = makeCtx(undefined, false)
+    const leaderState = makeSimState()
+    const followerState = makeSimState()
+    const leaderKart = outOfBoundsKart(leaderState)
+    const followerKart = outOfBoundsKart(followerState)
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    updateRecovery(leaderCtx, leaderState, leaderKart, leaderEvents)
+    updateRecovery(followerCtx, followerState, followerKart, followerEvents)
+
+    expect(followerKart.respawnTicks).toBe(leaderKart.respawnTicks)
+    expect(followerKart.respawnTicks).toBe(72)
+    expect(followerKart.position.x).toBe(leaderKart.position.x)
+    expect(followerKart.position.z).toBe(leaderKart.position.z)
+    expect(leaderEvents.length).toBe(1)
+    expect(leaderEvents[0].kind).toBe('respawn')
+    expect(followerEvents.length).toBe(0)
+    expect(followerState.nextEventSeq).toBe(0)
+    expect(leaderState.nextEventSeq).toBe(1)
   })
 
   it('interpolates linearly toward the last checkpoint', () => {
@@ -508,6 +537,7 @@ describe('spin-out', () => {
 
 describe('startSpinOut', () => {
   it('arms the timer and emits one spinOut event', () => {
+    const ctx = makeCtx()
     const state = makeSimState()
     const k = state.karts[3]
     k.drift.active = true
@@ -516,7 +546,7 @@ describe('startSpinOut', () => {
     k.boostTicks = 30
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, 60, events)
+    startSpinOut(ctx, state, k, 60, events)
 
     expect(k.spinOutTicks).toBe(60)
     expect(k.drift.active).toBe(false)
@@ -534,12 +564,13 @@ describe('startSpinOut', () => {
   })
 
   it('is refused while the kart is invulnerable', () => {
+    const ctx = makeCtx()
     const state = makeSimState()
     const k = state.karts[0]
     k.invulnTicks = 5
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, 60, events)
+    startSpinOut(ctx, state, k, 60, events)
 
     expect(k.spinOutTicks).toBe(0)
     expect(events.length).toBe(0)
@@ -547,12 +578,13 @@ describe('startSpinOut', () => {
   })
 
   it('is refused while the kart is respawning', () => {
+    const ctx = makeCtx()
     const state = makeSimState()
     const k = state.karts[0]
     k.respawnTicks = 10
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, 60, events)
+    startSpinOut(ctx, state, k, 60, events)
 
     expect(k.spinOutTicks).toBe(0)
     expect(k.respawnTicks).toBe(10)
@@ -560,30 +592,32 @@ describe('startSpinOut', () => {
   })
 
   it('never shortens a spin-out already in progress', () => {
+    const ctx = makeCtx()
     const state = makeSimState()
     const k = state.karts[0]
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, 40, events)
+    startSpinOut(ctx, state, k, 40, events)
     expect(k.spinOutTicks).toBe(40)
     expect(events.length).toBe(1)
 
-    startSpinOut(state, k, 20, events) // shorter: ignored, no second event
+    startSpinOut(ctx, state, k, 20, events) // shorter: ignored, no second event
     expect(k.spinOutTicks).toBe(40)
     expect(events.length).toBe(1)
 
-    startSpinOut(state, k, 60, events) // longer: extends, and does emit
+    startSpinOut(ctx, state, k, 60, events) // longer: extends, and does emit
     expect(k.spinOutTicks).toBe(60)
     expect(events.length).toBe(2)
     expect(events[1].data).toBe(60)
   })
 
   it('ignores a non-positive duration', () => {
+    const ctx = makeCtx()
     const state = makeSimState()
     const k = state.karts[0]
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, 0, events)
+    startSpinOut(ctx, state, k, 0, events)
 
     expect(k.spinOutTicks).toBe(0)
     expect(events.length).toBe(0)
@@ -598,7 +632,7 @@ describe('startSpinOut', () => {
     k.velocity.x = 20
     const events: AuthEvent[] = []
 
-    startSpinOut(state, k, ctx.tuning.spinOutTicks, events)
+    startSpinOut(ctx, state, k, ctx.tuning.spinOutTicks, events)
     expect(k.spinOutTicks).toBe(60)
 
     for (let i = 0; i < 60; i++) updateRecovery(ctx, state, k, events)
@@ -609,5 +643,27 @@ describe('startSpinOut', () => {
     expect(events[0].kind).toBe('spinOut')
     // 20 * 0.94^60
     expect(k.velocity.x).toBeCloseTo(20 * Math.pow(0.94, 60), 12)
+  })
+
+  it('spins out identically on a follower, but announces nothing', () => {
+    const leaderCtx = makeCtx()
+    const followerCtx = makeCtx(undefined, false)
+    const leaderState = makeSimState()
+    const followerState = makeSimState()
+    const leaderKart = leaderState.karts[0]
+    const followerKart = followerState.karts[0]
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    startSpinOut(leaderCtx, leaderState, leaderKart, 60, leaderEvents)
+    startSpinOut(followerCtx, followerState, followerKart, 60, followerEvents)
+
+    expect(followerKart.spinOutTicks).toBe(leaderKart.spinOutTicks)
+    expect(followerKart.spinOutTicks).toBe(60)
+    expect(leaderEvents.length).toBe(1)
+    expect(leaderEvents[0].kind).toBe('spinOut')
+    expect(followerEvents.length).toBe(0)
+    expect(followerState.nextEventSeq).toBe(0)
+    expect(leaderState.nextEventSeq).toBe(1)
   })
 })

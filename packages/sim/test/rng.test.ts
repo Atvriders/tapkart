@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RNG_GOLDEN, RNG_MIX1, RNG_MIX2, rngAt } from '../src/rng'
+import { RNG_GOLDEN, RNG_MIX1, RNG_MIX2, promotionCursor, rngAt } from '../src/rng'
 
 const TWO32 = 4294967296
 
@@ -113,6 +113,43 @@ describe('rngAt distribution', () => {
     for (const b of buckets) {
       expect(b).toBeGreaterThan(9500)
       expect(b).toBeLessThan(10500)
+    }
+  })
+})
+
+describe('promotionCursor (ruling P2-R14)', () => {
+  it('is a pure function of (raceSeed, promotionTick)', () => {
+    expect(promotionCursor(0xabc, 900)).toBe(promotionCursor(0xabc, 900))
+    expect(promotionCursor(0xabc, 900)).not.toBe(promotionCursor(0xabd, 900))
+    expect(promotionCursor(0xabc, 900)).not.toBe(promotionCursor(0xabc, 901))
+  })
+
+  it('returns a uint32, never a negative int32 and never a fraction', () => {
+    for (let t = 0; t < 2000; t++) {
+      const c = promotionCursor(0x5eed, t)
+      expect(Number.isInteger(c), `tick ${t} produced ${c}`).toBe(true)
+      expect(c).toBeGreaterThanOrEqual(0)
+      expect(c).toBeLessThanOrEqual(0xffffffff)
+    }
+  })
+
+  it('lands far above the small cursor range a live host actually consumes', () => {
+    // The point of the ruling: `rngCursor = promotionTick` is deterministic but
+    // sits inside the few-thousand-wide band a host has been drawing from, so a
+    // promoted shadow would replay draws the host already consumed. Over 2000
+    // plausible promotion ticks, at most a handful may fall below 1e6 by
+    // chance; a version that just returned the tick would score 2000.
+    let low = 0
+    for (let t = 0; t < 2000; t++) {
+      if (promotionCursor(0x5eed, t) < 1e6) low++
+    }
+    expect(low).toBeLessThan(5)
+  })
+
+  it('is rngAt\'s own avalanche, one step short of the divide', () => {
+    // Same mixing function, so the two cannot drift apart under maintenance.
+    for (const [seed, tick] of [[0, 0], [1, 1], [0xabc, 900], [-7, 12345]] as const) {
+      expect(promotionCursor(seed, tick) / 4294967296).toBe(rngAt(seed, tick))
     }
   })
 })

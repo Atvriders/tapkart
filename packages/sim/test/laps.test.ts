@@ -24,7 +24,7 @@ const TRACK_LEN = 400
 
 const wrap01 = (v: number): number => ((v % 1) + 1) % 1
 
-function stubContext(): SimContext {
+function stubContext(isLeader = true): SimContext {
   const track: Track = {
     id: 'stub-loop',
     name: 'Stub Loop',
@@ -51,7 +51,7 @@ function stubContext(): SimContext {
     checkpointIndexAt: (s) => Math.min(3, Math.floor(wrap01(s) * 4)),
     totalLength: () => TRACK_LEN,
   }
-  return { track, query, tuning: makeTuning(), characters: makeCharacters(), isLeader: true }
+  return { track, query, tuning: makeTuning(), characters: makeCharacters(), isLeader }
 }
 
 // checkpointIdx 3 is what createState [Task 5] gives every kart on a
@@ -118,6 +118,10 @@ function blankState(): SimState {
     nextEntityId: 1,
     itemBoxes: [],
     finishedOrder: emptyFinishedOrder(),
+    heldBotIntent: Array.from({ length: MAX_KARTS }, () => (
+      { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    )),
+    heldBotTick: new Array<number>(MAX_KARTS).fill(-1),
   }
 }
 
@@ -460,5 +464,43 @@ describe('step() wiring', () => {
     expect(prev.karts[0].lap.lap).toBe(0)
     expect(prev.karts[0].lap.checkpointIdx).toBe(3)
     expect(prev.tick).toBe(700)
+  })
+})
+
+describe('updateLaps on a follower', () => {
+  it('crosses the line and finishes exactly as a leader does, but announces nothing', () => {
+    const leaderCtx = stubContext(true)
+    const followerCtx = stubContext(false)
+    const leaderState = blankState()
+    const followerState = blankState()
+    const leaderKart = leaderState.karts[1]
+    const followerKart = followerState.karts[1]
+    // s = 4 / 400 = 0.01, inside checkpoint 0's [0, 0.25) range; checkpointIdx 3
+    // (the last of four) plus lap 2 means this crossing completes lap 3.
+    leaderKart.position.x = 4
+    leaderKart.lap = { lap: 2, checkpointIdx: 3, t: 0.99 }
+    followerKart.position.x = 4
+    followerKart.lap = { lap: 2, checkpointIdx: 3, t: 0.99 }
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    updateLaps(leaderCtx, leaderState, leaderKart, leaderEvents)
+    updateLaps(followerCtx, followerState, followerKart, followerEvents)
+
+    // Simulation identical: both complete lap 3 and both finish.
+    expect(followerKart.lap.lap).toBe(leaderKart.lap.lap)
+    expect(followerKart.lap.lap).toBe(3)
+    expect(followerKart.lap.checkpointIdx).toBe(leaderKart.lap.checkpointIdx)
+    expect(followerState.finishedOrder[0]).toBe(leaderState.finishedOrder[0])
+    expect(followerState.finishedOrder[0]).toBe(1)
+    expect(followerState.finishTick).toBe(leaderState.finishTick)
+
+    // Announcement suppressed on the follower only.
+    expect(leaderEvents.length).toBe(2)
+    expect(leaderEvents[0].kind).toBe('lapCross')
+    expect(leaderEvents[1].kind).toBe('finish')
+    expect(followerEvents.length).toBe(0)
+    expect(leaderState.nextEventSeq).toBe(2)
+    expect(followerState.nextEventSeq).toBe(0)
   })
 })

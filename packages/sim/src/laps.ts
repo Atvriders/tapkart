@@ -94,7 +94,8 @@ export function updateLaps(
   if (idx !== 0) return // an ordinary checkpoint, not the finish line
 
   k.lap.lap += 1
-  emit(state, events, 'lapCross', k.playerId, -1, 'none', k.lap.lap)
+  // A non-leader never emits (contract §0); the crossing still happened.
+  if (ctx.isLeader) emit(state, events, 'lapCross', k.playerId, -1, 'none', k.lap.lap)
 
   if (k.lap.lap < RACE_LAPS) return
   if (hasFinished(state, k.playerId)) return
@@ -104,5 +105,5 @@ export function updateLaps(
   if (state.finishTick < 0) state.finishTick = state.tick
   // The contract fixes the finish event's data as the 1-based finishing place,
   // and slot is the 0-based one.
-  emit(state, events, 'finish', k.playerId, -1, 'none', slot + 1)
+  if (ctx.isLeader) emit(state, events, 'finish', k.playerId, -1, 'none', slot + 1)
 }

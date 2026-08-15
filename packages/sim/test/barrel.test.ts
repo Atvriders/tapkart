@@ -71,7 +71,6 @@ import {
   // phase [Task 15]
   FINISH_GRACE_TICKS,
   makeIntentBuffer,
-  resetBotHold,
   resolveInputs,
   updatePhase,
   // replay [Task 16]
@@ -203,7 +202,6 @@ describe('@tapkart/sim barrel', () => {
       ['items.useItem', useItem],
       ['bot.botIntent', botIntent],
       ['phase.makeIntentBuffer', makeIntentBuffer],
-      ['phase.resetBotHold', resetBotHold],
       ['phase.resolveInputs', resolveInputs],
       ['phase.updatePhase', updatePhase],
       ['replay.intentOffset', intentOffset],
@@ -211,12 +209,12 @@ describe('@tapkart/sim barrel', () => {
       ['replay.recordRun', recordRun],
       ['replay.replayRun', replayRun],
     ]
-    // 47 functions across the 18 modules that export any. The nineteenth,
+    // 46 functions across the 18 modules that export any. The nineteenth,
     // `types`, exports only constants and types; the constants test below
     // covers it. 5 vec3 + 3 mathutil + 1 rng + 2 track + 4 state + 1 step
     // + 2 kart + 3 ground + 2 drift + 3 recovery + 1 collision + 1 laps
-    // + 2 placement + 5 entity + 3 items + 1 bot + 4 phase + 4 replay = 47.
-    expect(fns).toHaveLength(47)
+    // + 2 placement + 5 entity + 3 items + 1 bot + 3 phase + 4 replay = 46.
+    expect(fns).toHaveLength(46)
     for (const [name, fn] of fns) {
       expect(typeof fn, `${name} did not come through the barrel as a function`).toBe('function')
     }
@@ -292,7 +290,6 @@ describe('@tapkart/sim barrel', () => {
     const inputs = makeIntentBuffer()
     const events: AuthEvent[] = []
 
-    resetBotHold()
     step(ctx, prev, next, inputs, events)
 
     expect(next.tick).toBe(1)

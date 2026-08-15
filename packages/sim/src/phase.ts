@@ -25,33 +25,6 @@ export function makeIntentBuffer(): Intent[] {
   return out
 }
 
-/**
- * The 30 Hz bot hold. Bots produce an Intent on even ticks only and the odd tick
- * of the pair reuses it, matching the 30 Hz human input rate exactly so bots and
- * humans quantise drift timing identically.
- *
- * This is the only simulation state that lives outside SimState, because
- * SimState is locked and has no field for it. `holdTick[i]` records the EVEN
- * tick the held intent belongs to; an odd tick may reuse the hold only when
- * `holdTick[i] === tick - 1`.
- */
-const holdIntent: Intent[] = makeIntentBuffer()
-const holdTick: Int32Array = new Int32Array(MAX_KARTS).fill(-1)
-
-/** Clears the 30 Hz bot hold. Call this when starting or restarting a run. */
-export function resetBotHold(): void {
-  for (let i = 0; i < MAX_KARTS; i++) {
-    holdTick[i] = -1
-    const h = holdIntent[i]
-    h.tick = 0
-    h.steer = 0
-    h.accel = 0
-    h.brake = false
-    h.drift = false
-    h.useItem = false
-  }
-}
-
 function freeze(o: Intent, tick: number): void {
   o.tick = tick
   o.steer = 0
@@ -80,10 +53,13 @@ function copyIntent(src: Intent, dst: Intent, tick: number): void {
  *   - connected human -> clamped, sanitised, restamped with `state.tick`
  *
  * `inputs` and `out` are indexed by kart slot: `inputs[i]` belongs to
- * `state.karts[i]`. Neither `inputs` nor `state` is mutated. Nothing allocates,
- * including `botIntent`: it returns a POOLED per-playerId Intent, the same
- * object on every call for that playerId, whose fields are copied out here by
- * copyIntent. The reference is never retained.
+ * `state.karts[i]`. `inputs` is never mutated. The 30Hz bot hold (Plan 2 Task 1)
+ * lives on `state.heldBotIntent` / `state.heldBotTick`, so this is the only stage
+ * that writes into `state` outside of `step()`'s own per-kart pipeline — every
+ * other read of `state` in this function is read-only. `botIntent` allocates
+ * nothing: it returns a POOLED per-playerId Intent, the same object on every
+ * call for that playerId, whose fields are copied out here by copyIntent. The
+ * reference is never retained.
  */
 export function resolveInputs(
   ctx: SimContext,
@@ -107,16 +83,16 @@ export function resolveInputs(
     if (k.isBot || !k.connected) {
       if (tick % 2 === 0) {
         // even tick: recompute and own the pair (tick, tick + 1)
-        copyIntent(botIntent(ctx, state, k.playerId), holdIntent[i], tick)
-        holdTick[i] = tick
-      } else if (holdTick[i] !== tick - 1) {
+        copyIntent(botIntent(ctx, state, k.playerId), state.heldBotIntent[i], tick)
+        state.heldBotTick[i] = tick
+      } else if (state.heldBotTick[i] !== tick - 1) {
         // odd tick with no matching hold (cold start, or a slot that only just
         // became bot-driven): compute now and back-date the hold so the pair is
         // consistent from here on.
-        copyIntent(botIntent(ctx, state, k.playerId), holdIntent[i], tick)
-        holdTick[i] = tick - 1
+        copyIntent(botIntent(ctx, state, k.playerId), state.heldBotIntent[i], tick)
+        state.heldBotTick[i] = tick - 1
       }
-      copyIntent(holdIntent[i], o, tick)
+      copyIntent(state.heldBotIntent[i], o, tick)
       continue
     }
 

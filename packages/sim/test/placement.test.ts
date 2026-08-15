@@ -66,6 +66,10 @@ function blankState(): SimState {
     nextEntityId: 1,
     itemBoxes: [],
     finishedOrder: emptyFinishedOrder(),
+    heldBotIntent: Array.from({ length: MAX_KARTS }, () => (
+      { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    )),
+    heldBotTick: new Array<number>(MAX_KARTS).fill(-1),
   }
 }
 

@@ -88,6 +88,23 @@ describe('createState', () => {
     }
   })
 
+  it('initialises heldBotIntent to neutral intents and heldBotTick to -1', () => {
+    const ctx = makeTestContext(EIGHT_STARTS)
+    const st = createState(ctx, 12345, [0, 1, 2, 3, 4, 5, 6, 7])
+
+    expect(st.heldBotIntent).toHaveLength(MAX_KARTS)
+    expect(st.heldBotTick).toHaveLength(MAX_KARTS)
+    for (let i = 0; i < MAX_KARTS; i++) {
+      expect(st.heldBotIntent[i].tick).toBe(0)
+      expect(st.heldBotIntent[i].steer).toBe(0)
+      expect(st.heldBotIntent[i].accel).toBe(0)
+      expect(st.heldBotIntent[i].brake).toBe(false)
+      expect(st.heldBotIntent[i].drift).toBe(false)
+      expect(st.heldBotIntent[i].useItem).toBe(false)
+      expect(st.heldBotTick[i]).toBe(-1)
+    }
+  })
+
   it('clamps characterIdx into range and defaults unsupplied seats to 0', () => {
     const ctx = makeTestContext(EIGHT_STARTS)
     // makeCharacters() returns exactly 8 characters, so the valid range is 0..7.
@@ -169,6 +186,13 @@ describe('cloneState / statesEqual', () => {
     a.entities[0].ttl = 120
     a.finishedOrder[0] = 6
     a.itemBoxes[2].respawnTicks = 41
+    a.heldBotIntent[5].steer = 0.75
+    a.heldBotIntent[5].accel = 0.5
+    a.heldBotIntent[5].brake = true
+    a.heldBotIntent[5].drift = true
+    a.heldBotIntent[5].useItem = true
+    a.heldBotIntent[5].tick = 200
+    a.heldBotTick[5] = 200
 
     cloneState(a, b)
 
@@ -191,6 +215,13 @@ describe('cloneState / statesEqual', () => {
     expect(b.entities[0].ttl).toBe(120)
     expect(b.finishedOrder[0]).toBe(6)
     expect(b.itemBoxes[2].respawnTicks).toBe(41)
+    expect(b.heldBotIntent[5].steer).toBe(0.75)
+    expect(b.heldBotIntent[5].accel).toBe(0.5)
+    expect(b.heldBotIntent[5].brake).toBe(true)
+    expect(b.heldBotIntent[5].drift).toBe(true)
+    expect(b.heldBotIntent[5].useItem).toBe(true)
+    expect(b.heldBotIntent[5].tick).toBe(200)
+    expect(b.heldBotTick[5]).toBe(200)
   })
 
   it('writes into dst in place, reusing every existing object', () => {
@@ -288,6 +319,8 @@ describe('cloneState / statesEqual', () => {
     expect(differsAfter(() => { b.entities[31].kind = 'slick' })).toBe(false)
     expect(differsAfter(() => { b.finishedOrder[7] = 3 })).toBe(false)
     expect(differsAfter(() => { b.itemBoxes[0].respawnTicks = 1 })).toBe(false)
+    expect(differsAfter(() => { b.heldBotIntent[2].steer = 0.5 })).toBe(false)
+    expect(differsAfter(() => { b.heldBotTick[2] = 5 })).toBe(false)
     expect(differsAfter(() => { /* no mutation */ })).toBe(true)
   })
 })

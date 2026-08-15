@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Intent, SimContext, SimState } from '../src/types'
-import { COUNTDOWN_TICKS, MAX_KARTS } from '../src/types'
+import { MAX_KARTS } from '../src/types'
 import { rngAt } from '../src/rng'
 import { createState, statesEqual } from '../src/state'
 import type { IntentSource } from '../src/replay'
@@ -12,7 +12,6 @@ import {
   recordRun,
   replayRun,
 } from '../src/replay'
-import { makeIntentBuffer, resetBotHold, resolveInputs } from '../src/phase'
 import { makeContext, makeOvalTrack } from './fixtures/track-fixtures'
 
 const CHARS = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -403,102 +402,38 @@ describe('checkpoint-replay equivalence with bot-driven karts', () => {
       expect(Object.is(replayed.karts[i].drift.charge, straight.end.karts[i].drift.charge)).toBe(true)
     }
   })
-
-  it('is independent of a bot hold left dirty by an earlier run', () => {
-    const ctx = makeContext(makeOvalTrack())
-    resetBotHold()
-
-    // kart.ts gates steering by `authority = sn * (1 - falloff * sn)`, sn = entry
-    // speed / maxSpeed: a kart at rest has authority 0, so a poisoned steer intent
-    // consumed on tick 1 of a cold start would move nothing and this test would
-    // pass whether or not recordRun resets the hold. Two warm-up ticks give the
-    // bots real, nonzero velocity so the poisoned steer is actually observable.
-    const s0 = botStart(ctx)
-    s0.phase = 'racing'
-    const warm = recordRun(ctx, s0, 2, scriptedSrc).end
-    expect(warm.tick % 2).toBe(0)   // even, so the next tick (odd) is a hold-reuse tick
-    expect(warm.karts[4].velocity.x !== 0 || warm.karts[4].velocity.z !== 0).toBe(true)
-
-    // Poison the module-level 30Hz hold: resolve the bot slots from a state offset
-    // from `warm`, so holdTick becomes warm.tick and the real run's very next step
-    // (the odd tick warm.tick + 1) would otherwise reuse this bogus intent instead
-    // of recomputing.
-    const bogus = allocStateLike(ctx, warm)
-    for (let i = 4; i < MAX_KARTS; i++) bogus.karts[i].position.x += 25
-    resetBotHold()
-    resolveInputs(ctx, bogus, makeIntentBuffer(), makeIntentBuffer())
-
-    const dirtyRun = recordRun(ctx, allocStateLike(ctx, warm), 40, scriptedSrc)
-
-    resetBotHold()
-    const cleanRun = recordRun(ctx, allocStateLike(ctx, warm), 40, scriptedSrc)
-
-    expect(dirtyRun.end.tick).toBe(warm.tick + 40)
-    expect(statesEqual(dirtyRun.end, cleanRun.end)).toBe(true)
-  })
 })
 
-describe('replayRun checkpoint parity guard', () => {
-  it('rejects an even checkpoint tick when a bot-driven kart is racing', () => {
+describe('replayRun with an even checkpoint and bot-driven karts', () => {
+  it('replays bit-identically from an even checkpoint tick now that the hold lives in SimState', () => {
     const ctx = makeContext(makeOvalTrack())
     const start = botStart(ctx)
 
-    // 360 is even and well past COUNTDOWN_TICKS (180), so the checkpoint is
-    // racing, not countdown, and slots 4-7 are bot-driven: exactly the
-    // condition needsOddCheckpoint is meant to catch.
+    // 360 is even and well past COUNTDOWN_TICKS (180): before this task this was
+    // exactly the condition the deleted RangeError guard rejected. cloneState now
+    // carries heldBotIntent/heldBotTick, so every tick is a legal checkpoint.
+    const straight = recordRun(ctx, start, 600, scriptedSrc)
     const seg1 = recordRun(ctx, start, 360, scriptedSrc)
-    const seg2 = recordRun(ctx, seg1.end, 40, scriptedSrc)
+    const seg2 = recordRun(ctx, seg1.end, 240, scriptedSrc)
+    expect(statesEqual(seg2.end, straight.end)).toBe(true)
+
+    // the bots really drove: slot 7 is bot-driven and moved
+    expect(straight.end.karts[7].isBot).toBe(true)
+    expect(straight.end.karts[7].position.x).not.toBe(start.karts[7].position.x)
+
     const checkpoint = allocStateLike(ctx, seg1.end)
     expect(checkpoint.tick % 2).toBe(0)
     expect(checkpoint.phase).toBe('racing')
     expect(checkpoint.karts.some((k) => k.isBot)).toBe(true)
 
-    expect(() => replayRun(ctx, checkpoint, seg2.intents, 360, 400)).toThrow(
-      /bot-driven or disconnected/,
-    )
-  })
+    const replayed = replayRun(ctx, checkpoint, seg2.intents, 360, 600)
 
-  it('accepts an even checkpoint tick when every kart is connected and human', () => {
-    const ctx = makeContext(makeOvalTrack())
-    const start = humanStart(ctx)
-
-    const N = 600
-    const T = 360   // even, and no kart is bot-driven or disconnected
-    const straight = recordRun(ctx, start, N, scriptedSrc)
-    const seg1 = recordRun(ctx, start, T, scriptedSrc)
-    const seg2 = recordRun(ctx, seg1.end, N - T, scriptedSrc)
-    const checkpoint = allocStateLike(ctx, seg1.end)
-    expect(checkpoint.tick % 2).toBe(0)
-    expect(checkpoint.karts.every((k) => !k.isBot && k.connected)).toBe(true)
-
-    // Must not throw, and the guard being scoped to bot/disconnected karts must
-    // not have quietly become a blanket even-tick rejection.
-    const replayed = replayRun(ctx, checkpoint, seg2.intents, T, N)
     expect(replayed.tick).toBe(600)
     expect(statesEqual(replayed, straight.end)).toBe(true)
-  })
-
-  it('accepts an even checkpoint tick with bot-driven karts during countdown', () => {
-    const ctx = makeContext(makeOvalTrack())
-    const start = botStart(ctx)   // phase stays 'countdown': createState's default
-
-    // resolveInputs freezes every kart to all-zero while phase === 'countdown',
-    // before it ever looks at isBot/connected, so the bot hold is never touched
-    // here regardless of tick parity. 40 is even and well inside the 180-tick
-    // countdown, so this checkpoint is the case needsOddCheckpoint must NOT flag.
-    const N = 100
-    const T = 40
-    expect(T).toBeLessThan(COUNTDOWN_TICKS)
-    const straight = recordRun(ctx, start, N, scriptedSrc)
-    const seg1 = recordRun(ctx, start, T, scriptedSrc)
-    const seg2 = recordRun(ctx, seg1.end, N - T, scriptedSrc)
-    const checkpoint = allocStateLike(ctx, seg1.end)
-    expect(checkpoint.tick % 2).toBe(0)
-    expect(checkpoint.phase).toBe('countdown')
-    expect(checkpoint.karts.some((k) => k.isBot)).toBe(true)
-
-    const replayed = replayRun(ctx, checkpoint, seg2.intents, T, N)
-    expect(replayed.tick).toBe(N)
-    expect(statesEqual(replayed, straight.end)).toBe(true)
+    for (let i = 4; i < MAX_KARTS; i++) {
+      expect(Object.is(replayed.karts[i].position.x, straight.end.karts[i].position.x)).toBe(true)
+      expect(Object.is(replayed.karts[i].heading, straight.end.karts[i].heading)).toBe(true)
+      expect(Object.is(replayed.karts[i].drift.charge, straight.end.karts[i].drift.charge)).toBe(true)
+    }
   })
 })

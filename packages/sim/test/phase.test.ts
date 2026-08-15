@@ -5,7 +5,7 @@ import { createState } from '../src/state'
 import { step } from '../src/step'
 import { botIntent } from '../src/bot'
 import type { AuthEvent } from '../src/types'
-import { FINISH_GRACE_TICKS, makeIntentBuffer, resetBotHold, resolveInputs, updatePhase } from '../src/phase'
+import { FINISH_GRACE_TICKS, makeIntentBuffer, resolveInputs, updatePhase } from '../src/phase'
 import { makeContext, makeStraightTrack } from './fixtures/track-fixtures'
 
 const CHARS = [0, 1, 2, 3, 4, 5, 6, 7]
@@ -58,7 +58,6 @@ describe('resolveInputs', () => {
     const out = makeIntentBuffer()
     const inputs = makeIntentBuffer()
 
-    resetBotHold()
     resolveInputs(ctx, s, inputs, out)
 
     expect(out[5].tick).toBe(180)
@@ -151,7 +150,6 @@ describe('resolveInputs', () => {
       inputs.push(intent({ tick: 199, steer: 0.9, accel: 0.1, useItem: true }))
     }
 
-    resetBotHold()
     resolveInputs(ctx, s, inputs, out)
 
     // bot slot: botIntent wins, raw input discarded
@@ -183,13 +181,14 @@ describe('resolveInputs', () => {
     const out = makeIntentBuffer()
     const inputs = makeIntentBuffer()
 
-    resetBotHold()
-
     // even tick 200: fresh compute
     resolveInputs(ctx, s, inputs, out)
     const first = { steer: out[0].steer, accel: out[0].accel, drift: out[0].drift }
     expect(Object.is(first.steer, botIntent(ctx, s, 0).steer)).toBe(true)
     expect(out[0].tick).toBe(200)
+    // Plan 2 Task 1: the hold now lives on the state itself.
+    expect(s.heldBotTick[0]).toBe(200)
+    expect(Object.is(s.heldBotIntent[0].steer, first.steer)).toBe(true)
 
     // move the kart 6 m off the centreline and advance to the ODD tick of the pair.
     // makeStraightTrack runs along +X, so +z is 6 m of lateral displacement.
@@ -223,13 +222,47 @@ describe('resolveInputs', () => {
     s.karts[0].isBot = true
     const out = makeIntentBuffer()
 
-    resetBotHold()
     resolveInputs(ctx, s, makeIntentBuffer(), out)
 
     const fresh = botIntent(ctx, s, 0)
     expect(Object.is(out[0].steer, fresh.steer)).toBe(true)
     expect(Object.is(out[0].accel, fresh.accel)).toBe(true)
     expect(out[0].tick).toBe(301)
+  })
+
+  it('proves two SimStates never share a bot hold, unlike the old module-scope design', () => {
+    // The spec's motivating defect: two rooms driving bots in one process
+    // interleave resolveInputs calls and drive each other's bots, measured at
+    // 3 cm of divergence after 40 ticks. This reproduces the exact mechanism:
+    // room1 computes a fresh hold on an even tick, then room2 -- cold, never
+    // ticked before -- resolves an ODD tick immediately after. Under the old
+    // module-scope hold, room2 would see holdTick[0] === room2.tick - 1 (both
+    // are 200) and wrongly reuse room1's intent. With the hold on state, room2's
+    // own heldBotTick starts at -1, so it must recompute from its own data.
+    const ctx = makeContext(makeStraightTrack())
+    const room1 = humanState(ctx, 'racing', 200)
+    room1.karts[0].isBot = true
+
+    const room2 = humanState(ctx, 'racing', 201)
+    room2.karts[0].isBot = true
+    room2.karts[0].position.z += 6 // displaced, so its own bot intent differs
+
+    const out1 = makeIntentBuffer()
+    resolveInputs(ctx, room1, makeIntentBuffer(), out1)
+    expect(room1.heldBotTick[0]).toBe(200)
+
+    const out2 = makeIntentBuffer()
+    resolveInputs(ctx, room2, makeIntentBuffer(), out2)
+
+    const fresh2 = botIntent(ctx, room2, 0)
+    expect(Object.is(out2[0].steer, fresh2.steer)).toBe(true)
+    expect(Object.is(out2[0].accel, fresh2.accel)).toBe(true)
+    expect(room2.heldBotTick[0]).toBe(200) // room2's OWN hold tick
+    expect(room1.heldBotTick[0]).toBe(200) // unaffected by room2's call
+
+    // The two rooms' outputs genuinely differ, proving room2 did not simply
+    // inherit room1's stale intent.
+    expect(out1[0].steer === out2[0].steer && out1[0].accel === out2[0].accel).toBe(false)
   })
 })
 
@@ -469,7 +502,6 @@ describe('step() wiring', () => {
     }
     const events: AuthEvent[] = []
 
-    resetBotHold()
     expect(cur.tick).toBe(0)
     expect(cur.phase).toBe('countdown')
 

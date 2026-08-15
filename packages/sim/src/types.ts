@@ -74,6 +74,8 @@ export interface SimState {
   nextEntityId: number
   itemBoxes: ItemBoxState[]
   finishedOrder: number[]
+  heldBotIntent: Intent[]       // always length MAX_KARTS
+  heldBotTick: number[]         // always length MAX_KARTS, -1 = no held intent
 }
 
 export type AuthEventKind =

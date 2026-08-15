@@ -2,6 +2,7 @@ import type {
   AuthEvent,
   AuthEventKind,
   EntityState,
+  Intent,
   ItemBoxState,
   ItemKind,
   KartState,
@@ -108,6 +109,17 @@ export function createState(ctx: SimContext, seed: number, characterIdx: number[
     finishedOrder.push(-1)
   }
 
+  // Plan 2 Task 1: the 30Hz bot-input hold, formerly module scope in phase.ts,
+  // now lives here so two SimStates in one process never share it.
+  // heldBotTick[i] === -1 means "no held intent"; otherwise it records the EVEN
+  // tick the held intent belongs to, exactly as phase.ts's resolveInputs uses it.
+  const heldBotIntent: Intent[] = []
+  const heldBotTick: number[] = []
+  for (let i = 0; i < MAX_KARTS; i++) {
+    heldBotIntent.push({ tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false })
+    heldBotTick.push(-1)
+  }
+
   return {
     tick: 0,
     phase: 'countdown',
@@ -121,6 +133,8 @@ export function createState(ctx: SimContext, seed: number, characterIdx: number[
     nextEntityId: 1,
     itemBoxes,
     finishedOrder,
+    heldBotIntent,
+    heldBotTick,
   }
 }
 
@@ -128,18 +142,21 @@ export function createState(ctx: SimContext, seed: number, characterIdx: number[
  * Deep-copy `src` into the already-allocated `dst`. Allocates nothing: every
  * object in `dst` is written field by field and reused.
  *
- * All four arrays must already match in length — `karts` (MAX_KARTS),
- * `entities` (MAX_ENTITIES), `itemBoxes` (the track's item-box count) and
- * `finishedOrder` (MAX_KARTS) — which is checked once up front and throws
- * otherwise. That check is what forbids `finishedOrder.push(...)` anywhere in the
- * sim: a 9th entry would make every subsequent clone throw.
+ * All six arrays must already match in length — `karts` (MAX_KARTS),
+ * `entities` (MAX_ENTITIES), `itemBoxes` (the track's item-box count),
+ * `finishedOrder`, `heldBotIntent` and `heldBotTick` (all MAX_KARTS) — which is
+ * checked once up front and throws otherwise. That check is what forbids
+ * `finishedOrder.push(...)` anywhere in the sim: a 9th entry would make every
+ * subsequent clone throw.
  */
 export function cloneState(src: SimState, dst: SimState): void {
   if (
     dst.karts.length !== src.karts.length ||
     dst.entities.length !== src.entities.length ||
     dst.itemBoxes.length !== src.itemBoxes.length ||
-    dst.finishedOrder.length !== src.finishedOrder.length
+    dst.finishedOrder.length !== src.finishedOrder.length ||
+    dst.heldBotIntent.length !== src.heldBotIntent.length ||
+    dst.heldBotTick.length !== src.heldBotTick.length
   ) {
     throw new Error('cloneState: dst was not preallocated with the same shape as src')
   }
@@ -209,6 +226,18 @@ export function cloneState(src: SimState, dst: SimState): void {
   for (let i = 0; i < src.finishedOrder.length; i++) {
     dst.finishedOrder[i] = src.finishedOrder[i]
   }
+
+  for (let i = 0; i < src.heldBotIntent.length; i++) {
+    const a = src.heldBotIntent[i]
+    const b = dst.heldBotIntent[i]
+    b.tick = a.tick
+    b.steer = a.steer
+    b.accel = a.accel
+    b.brake = a.brake
+    b.drift = a.drift
+    b.useItem = a.useItem
+    dst.heldBotTick[i] = src.heldBotTick[i]
+  }
 }
 
 /**
@@ -234,7 +263,9 @@ export function statesEqual(a: SimState, b: SimState): boolean {
     a.karts.length !== b.karts.length ||
     a.entities.length !== b.entities.length ||
     a.itemBoxes.length !== b.itemBoxes.length ||
-    a.finishedOrder.length !== b.finishedOrder.length
+    a.finishedOrder.length !== b.finishedOrder.length ||
+    a.heldBotIntent.length !== b.heldBotIntent.length ||
+    a.heldBotTick.length !== b.heldBotTick.length
   ) {
     return false
   }
@@ -306,6 +337,22 @@ export function statesEqual(a: SimState, b: SimState): boolean {
 
   for (let i = 0; i < a.finishedOrder.length; i++) {
     if (!Object.is(a.finishedOrder[i], b.finishedOrder[i])) {
+      return false
+    }
+  }
+
+  for (let i = 0; i < a.heldBotIntent.length; i++) {
+    const x = a.heldBotIntent[i]
+    const y = b.heldBotIntent[i]
+    if (
+      !Object.is(x.tick, y.tick) ||
+      !Object.is(x.steer, y.steer) ||
+      !Object.is(x.accel, y.accel) ||
+      !Object.is(x.brake, y.brake) ||
+      !Object.is(x.drift, y.drift) ||
+      !Object.is(x.useItem, y.useItem) ||
+      !Object.is(a.heldBotTick[i], b.heldBotTick[i])
+    ) {
       return false
     }
   }

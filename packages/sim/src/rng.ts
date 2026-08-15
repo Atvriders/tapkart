@@ -29,3 +29,28 @@ export function rngAt(seed: number, cursor: number): number {
   z = z ^ (z >>> 15)
   return (z >>> 0) / 4294967296
 }
+
+/**
+ * The rngCursor a shadow authority adopts at the instant it is promoted.
+ * Ruling P2-R14.
+ *
+ * rngAt is stateless, so "re-seeded from (raceSeed, promotionTick)" (spec §5)
+ * means re-deriving the CURSOR: the seed is still raceSeed. This is rngAt's own
+ * avalanche returning the int32 instead of dividing it into [0, 1), so the
+ * result is uniform across the whole 32-bit range and cannot land in the small
+ * low range the dead host had actually consumed.
+ *
+ * Why a re-derivation is needed at all: a follower never rolls items, so a
+ * shadow's rngCursor sits wherever it started while the host's advanced with
+ * every grant. Promoting without re-deriving would replay draws the host had
+ * already consumed.
+ *
+ * Deterministic and peer-recomputable: every client knows raceSeed and reads
+ * promotionTick off the authorityChange message, so nobody has to be told it.
+ */
+export function promotionCursor(raceSeed: number, promotionTick: number): number {
+  let z = (raceSeed + Math.imul(promotionTick + 1, RNG_GOLDEN)) | 0
+  z = Math.imul(z ^ (z >>> 16), RNG_MIX1)
+  z = Math.imul(z ^ (z >>> 15), RNG_MIX2)
+  return (z ^ (z >>> 15)) >>> 0
+}

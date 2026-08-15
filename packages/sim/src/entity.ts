@@ -43,6 +43,7 @@ function clearSlot(e: EntityState): void {
  * `position` is copied by value; `velocity` is derived by updateEntities.
  */
 export function spawnEntity(
+  ctx: SimContext,
   state: SimState,
   kind: EntityKind,
   ownerId: number,
@@ -73,7 +74,7 @@ export function spawnEntity(
   e.targetId = targetId
   e.ttl = ttl
 
-  emit(state, events, 'entitySpawn', ownerId, entityId, kind, ttl)
+  if (ctx.isLeader) emit(state, events, 'entitySpawn', ownerId, entityId, kind, ttl)
   return entityId
 }
 
@@ -90,11 +91,11 @@ export function spawnEntity(
  * bubble on screen. Clearing it here covers ttl, hit-absorption and anything added
  * later, and it is idempotent: the strike path has already written `false`.
  */
-export function despawnEntityAt(state: SimState, idx: number, events: AuthEvent[]): void {
+export function despawnEntityAt(ctx: SimContext, state: SimState, idx: number, events: AuthEvent[]): void {
   if (idx < 0 || idx >= state.entityCount) return
 
   const e = state.entities[idx]
-  emit(state, events, 'entityDespawn', e.ownerId, e.entityId, e.kind, 0)
+  if (ctx.isLeader) emit(state, events, 'entityDespawn', e.ownerId, e.entityId, e.kind, 0)
   if (e.kind === 'bubble') {
     const owner = kartById(state, e.ownerId)
     if (owner !== null) owner.shielded = false
@@ -253,16 +254,16 @@ export function updateEntities(
       if (dx * dx + dy * dy + dz * dz > reach2) continue
       if (k.shielded) {
         k.shielded = false
-        emit(state, events, 'hit', k.playerId, e.entityId, e.kind, 1)
+        if (ctx.isLeader) emit(state, events, 'hit', k.playerId, e.entityId, e.kind, 1)
       } else {
-        emit(state, events, 'hit', k.playerId, e.entityId, e.kind, 0)
+        if (ctx.isLeader) emit(state, events, 'hit', k.playerId, e.entityId, e.kind, 0)
         // startSpinOut is the contract's sole writer of spinOutTicks and it
         // emits the 'spinOut' event itself.
-        startSpinOut(state, k, ctx.tuning.spinOutTicks, events)
+        startSpinOut(ctx, state, k, ctx.tuning.spinOutTicks, events)
       }
       if (e.kind === 'seeker' || e.kind === 'bolt') {
         // `e` is cleared by the swap-remove, so nothing may read it after this
-        despawnEntityAt(state, i, events)
+        despawnEntityAt(ctx, state, i, events)
         break
       }
     }
@@ -280,13 +281,13 @@ export function updateEntities(
     const e = state.entities[i]
     if (e.kind !== 'bubble') continue
     const owner = kartById(state, e.ownerId)
-    if (owner === null || !owner.shielded) despawnEntityAt(state, i, events)
+    if (owner === null || !owner.shielded) despawnEntityAt(ctx, state, i, events)
   }
 
   for (let i = state.entityCount - 1; i >= 0; i--) {
     const e = state.entities[i]
     e.ttl -= 1
-    if (e.ttl <= 0) despawnEntityAt(state, i, events)
+    if (e.ttl <= 0) despawnEntityAt(ctx, state, i, events)
   }
 }
 

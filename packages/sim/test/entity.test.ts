@@ -9,6 +9,7 @@ import {
 } from '../src/entity'
 import { targetSpeedFor } from '../src/kart'
 import { step } from '../src/step'
+import { statesEqual } from '../src/state'
 
 // A stub track: a 400 m loop, 20 m wide. The contract fixes `s` as
 // arc-normalised [0, 1) everywhere in this package -- never metres -- so
@@ -22,7 +23,7 @@ const TRACK_WIDTH = 20
 
 const wrap01 = (v: number): number => ((v % 1) + 1) % 1
 
-function stubContext(): SimContext {
+function stubContext(isLeader = true): SimContext {
   const track: Track = {
     id: 'stub-loop',
     name: 'Stub Loop',
@@ -49,7 +50,7 @@ function stubContext(): SimContext {
     checkpointIndexAt: (s) => Math.min(3, Math.floor(wrap01(s) * 4)),
     totalLength: () => TRACK_LEN,
   }
-  return { track, query, tuning: makeTuning(), characters: makeCharacters(), isLeader: true }
+  return { track, query, tuning: makeTuning(), characters: makeCharacters(), isLeader }
 }
 
 // Blank karts are parked far down the track (x = 1000 + 10 * playerId) so that
@@ -116,17 +117,22 @@ function blankState(): SimState {
     nextEntityId: 1,
     itemBoxes: [],
     finishedOrder: emptyFinishedOrder(),
+    heldBotIntent: Array.from({ length: MAX_KARTS }, () => (
+      { tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false }
+    )),
+    heldBotTick: new Array<number>(MAX_KARTS).fill(-1),
   }
 }
 
 describe('spawnEntity', () => {
   it('appends at the front of the pool, copies the position, wraps the heading and emits entitySpawn', () => {
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
     const p = { x: 1, y: 0.5, z: 2 }
 
     // 7 rad wraps into (-PI, PI] as 7 - 2 * PI = 0.7168146928204138
-    const id = spawnEntity(state, 'slick', 4, p, 7, -1, 600, events)
+    const id = spawnEntity(ctx, state, 'slick', 4, p, 7, -1, 600, events)
 
     expect(id).toBe(1)
     expect(state.nextEntityId).toBe(2)
@@ -160,35 +166,58 @@ describe('spawnEntity', () => {
   })
 
   it('drops the spawn and emits nothing when the pool is full', () => {
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
     for (let i = 0; i < MAX_ENTITIES; i++) {
-      const id = spawnEntity(state, 'bolt', 0, { x: i, y: 0, z: 0 }, 0, -1, 600, events)
+      const id = spawnEntity(ctx, state, 'bolt', 0, { x: i, y: 0, z: 0 }, 0, -1, 600, events)
       expect(id).toBe(i + 1) // ids run 1..32
     }
     expect(state.entityCount).toBe(MAX_ENTITIES) // 32
     expect(state.nextEntityId).toBe(33)
     expect(events.length).toBe(32)
 
-    const overflow = spawnEntity(state, 'bolt', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    const overflow = spawnEntity(ctx, state, 'bolt', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
 
     expect(overflow).toBe(-1)
     expect(state.entityCount).toBe(32)
     expect(state.nextEntityId).toBe(33) // not advanced by a dropped spawn
     expect(events.length).toBe(32) // nothing emitted
   })
+
+  it('spawns identically on a follower, but announces nothing', () => {
+    const leaderCtx = stubContext()
+    const followerCtx = stubContext(false)
+    const leaderState = blankState()
+    const followerState = blankState()
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+    const p = { x: 1, y: 0.5, z: 2 }
+
+    const leaderId = spawnEntity(leaderCtx, leaderState, 'slick', 4, p, 7, -1, 600, leaderEvents)
+    const followerId = spawnEntity(followerCtx, followerState, 'slick', 4, p, 7, -1, 600, followerEvents)
+
+    expect(followerId).toBe(leaderId)
+    expect(followerState.entities[0].position.x).toBe(leaderState.entities[0].position.x)
+    expect(followerState.entities[0].heading).toBe(leaderState.entities[0].heading)
+    expect(followerState.entityCount).toBe(leaderState.entityCount)
+    expect(leaderEvents.length).toBe(1)
+    expect(leaderEvents[0].kind).toBe('entitySpawn')
+    expect(followerEvents.length).toBe(0)
+  })
 })
 
 describe('despawnEntityAt', () => {
   it('swap-removes and clears the vacated slot to the canonical dead form', () => {
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, events) // id 1, idx 0
-    spawnEntity(state, 'bolt', 1, { x: 2, y: 0, z: 0 }, 0, -1, 600, events) // id 2, idx 1
-    spawnEntity(state, 'seeker', 2, { x: 3, y: 0, z: 0 }, 0.25, 5, 600, events) // id 3, idx 2
+    spawnEntity(ctx, state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, events) // id 1, idx 0
+    spawnEntity(ctx, state, 'bolt', 1, { x: 2, y: 0, z: 0 }, 0, -1, 600, events) // id 2, idx 1
+    spawnEntity(ctx, state, 'seeker', 2, { x: 3, y: 0, z: 0 }, 0.25, 5, 600, events) // id 3, idx 2
     events.length = 0
 
-    despawnEntityAt(state, 0, events)
+    despawnEntityAt(ctx, state, 0, events)
 
     expect(state.entityCount).toBe(2)
     expect(state.entities[0].entityId).toBe(3) // last live entity moved into slot 0
@@ -218,18 +247,39 @@ describe('despawnEntityAt', () => {
   })
 
   it('ignores an index outside the live range', () => {
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
-    despawnEntityAt(state, 1, events)
-    despawnEntityAt(state, -1, events)
-    despawnEntityAt(state, MAX_ENTITIES, events)
+    despawnEntityAt(ctx, state, 1, events)
+    despawnEntityAt(ctx, state, -1, events)
+    despawnEntityAt(ctx, state, MAX_ENTITIES, events)
 
     expect(state.entityCount).toBe(1)
     expect(state.entities[0].entityId).toBe(1)
     expect(events.length).toBe(0)
+  })
+
+  it('despawns identically on a follower, but announces nothing', () => {
+    const leaderCtx = stubContext()
+    const followerCtx = stubContext(false)
+    const leaderState = blankState()
+    const followerState = blankState()
+    spawnEntity(leaderCtx, leaderState, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, [])
+    spawnEntity(followerCtx, followerState, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 600, [])
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    despawnEntityAt(leaderCtx, leaderState, 0, leaderEvents)
+    despawnEntityAt(followerCtx, followerState, 0, followerEvents)
+
+    expect(followerState.entityCount).toBe(leaderState.entityCount)
+    expect(followerState.entities[0].entityId).toBe(leaderState.entities[0].entityId)
+    expect(leaderEvents.length).toBe(1)
+    expect(leaderEvents[0].kind).toBe('entityDespawn')
+    expect(followerEvents.length).toBe(0)
   })
 })
 
@@ -250,7 +300,7 @@ describe('updateEntities ttl', () => {
     const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    const id = spawnEntity(state, 'slick', 0, { x: 5, y: 0, z: 1 }, 0, -1, 2, events)
+    const id = spawnEntity(ctx, state, 'slick', 0, { x: 5, y: 0, z: 1 }, 0, -1, 2, events)
     expect(id).toBe(1)
     events.length = 0
 
@@ -274,10 +324,10 @@ describe('updateEntities ttl', () => {
     const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 1, events) // id 1, expires
-    spawnEntity(state, 'slick', 1, { x: 2, y: 0, z: 0 }, 0, -1, 5, events) // id 2, lives
-    spawnEntity(state, 'slick', 2, { x: 3, y: 0, z: 0 }, 0, -1, 1, events) // id 3, expires
-    spawnEntity(state, 'slick', 3, { x: 4, y: 0, z: 0 }, 0, -1, 5, events) // id 4, lives
+    spawnEntity(ctx, state, 'slick', 0, { x: 1, y: 0, z: 0 }, 0, -1, 1, events) // id 1, expires
+    spawnEntity(ctx, state, 'slick', 1, { x: 2, y: 0, z: 0 }, 0, -1, 5, events) // id 2, lives
+    spawnEntity(ctx, state, 'slick', 2, { x: 3, y: 0, z: 0 }, 0, -1, 1, events) // id 3, expires
+    spawnEntity(ctx, state, 'slick', 3, { x: 4, y: 0, z: 0 }, 0, -1, 5, events) // id 4, lives
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -305,7 +355,7 @@ describe('updateEntities motion', () => {
     state.karts[3].position.x = 10
     state.karts[3].position.y = 0
     state.karts[3].position.z = 10
-    spawnEntity(state, 'seeker', 0, { x: 0, y: 0.5, z: 0 }, 0, 3, 600, events)
+    spawnEntity(ctx, state, 'seeker', 0, { x: 0, y: 0.5, z: 0 }, 0, 3, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -331,7 +381,7 @@ describe('updateEntities motion', () => {
     const state = blankState()
     const events: AuthEvent[] = []
     // heading 0: cos = 1 and sin = 0 exactly, so it runs straight down +X
-    spawnEntity(state, 'seeker', 0, { x: 500, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'seeker', 0, { x: 500, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -350,7 +400,7 @@ describe('updateEntities motion', () => {
     const state = blankState()
     const events: AuthEvent[] = []
     // half width = 10; the bolt is at z = 9.9 heading PI/4 (out toward +z)
-    spawnEntity(state, 'bolt', 0, { x: 0, y: 0.5, z: 9.9 }, Math.PI / 4, -1, 600, events)
+    spawnEntity(ctx, state, 'bolt', 0, { x: 0, y: 0.5, z: 9.9 }, Math.PI / 4, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -374,7 +424,7 @@ describe('updateEntities motion', () => {
     const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'slick', 2, { x: 3, y: 0, z: -4 }, 1.25, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 2, { x: 3, y: 0, z: -4 }, 1.25, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -399,7 +449,7 @@ describe('updateEntities motion', () => {
     owner.position.y = 0
     owner.position.z = -3
     owner.shielded = true // the bubble is the view of this flag
-    spawnEntity(state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -421,8 +471,8 @@ describe('updateEntities motion', () => {
     const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'surge', 2, { x: 7, y: 0, z: 8 }, 0.5, -1, 300, events)
-    spawnEntity(state, 'charge', 3, { x: -5, y: 0, z: 6 }, -0.5, -1, 30, events)
+    spawnEntity(ctx, state, 'surge', 2, { x: 7, y: 0, z: 8 }, 0.5, -1, 300, events)
+    spawnEntity(ctx, state, 'charge', 3, { x: -5, y: 0, z: 6 }, -0.5, -1, 30, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -452,7 +502,7 @@ describe('updateEntities collision', () => {
     victim.position.y = 0
     victim.position.z = 0
     // slick reach = 1.2 + kartRadius 0.9 = 2.1, and it sits 1.5 away
-    spawnEntity(state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
     state.nextEventSeq = 0 // drop the spawn event and number the hit from 0
 
@@ -488,7 +538,7 @@ describe('updateEntities collision', () => {
     victim.position.z = 0
     // heading 0, no target: it steps to x = -2 + 55/60 = -1.0833333333333335,
     // inside the seeker reach of 1.6 + 0.9 = 2.5
-    spawnEntity(state, 'seeker', 0, { x: -2, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'seeker', 0, { x: -2, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -514,7 +564,7 @@ describe('updateEntities collision', () => {
     near.position.y = 0
     near.position.z = 0
     // 2.5 apart, and the slick only reaches 1.2 + 0.9 = 2.1
-    spawnEntity(state, 'slick', 0, { x: 2.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 2.5, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -532,7 +582,7 @@ describe('updateEntities collision', () => {
     owner.position.x = 0
     owner.position.y = 0
     owner.position.z = 0
-    spawnEntity(state, 'slick', 1, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 1, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -560,7 +610,7 @@ describe('updateEntities collision', () => {
     respawning.position.y = 0
     respawning.position.z = -1
     respawning.respawnTicks = 7
-    spawnEntity(state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -582,8 +632,8 @@ describe('updateEntities collision', () => {
     victim.position.y = 0
     victim.position.z = 0
     victim.shielded = true
-    spawnEntity(state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events) // id 1
-    spawnEntity(state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events) // id 2
+    spawnEntity(ctx, state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events) // id 1
+    spawnEntity(ctx, state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events) // id 2
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -608,7 +658,7 @@ describe('updateEntities collision', () => {
     const state = blankState()
     const events: AuthEvent[] = []
     state.karts[4].shielded = false
-    spawnEntity(state, 'bubble', 4, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'bubble', 4, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -631,7 +681,7 @@ describe('updateEntities collision', () => {
     const events: AuthEvent[] = []
     const owner = state.karts[4]
     owner.shielded = true
-    spawnEntity(state, 'bubble', 4, { x: 0, y: 0, z: 0 }, 0, -1, 3, events)
+    spawnEntity(ctx, state, 'bubble', 4, { x: 0, y: 0, z: 0 }, 0, -1, 3, events)
     events.length = 0
 
     updateEntities(ctx, state, events) // ttl 3 -> 2
@@ -661,7 +711,7 @@ describe('updateEntities collision', () => {
     const events: AuthEvent[] = []
     const owner = state.karts[5]
     owner.shielded = true
-    spawnEntity(state, 'bubble', 5, { x: 0, y: 0, z: 0 }, 0, -1, ctx.tuning.entityTtl, events)
+    spawnEntity(ctx, state, 'bubble', 5, { x: 0, y: 0, z: 0 }, 0, -1, ctx.tuning.entityTtl, events)
 
     for (let i = 0; i < ctx.tuning.entityTtl + 5; i++) updateEntities(ctx, state, events)
 
@@ -682,8 +732,8 @@ describe('updateEntities collision', () => {
     victim.position.y = 0
     victim.position.z = 0
     victim.shielded = true
-    spawnEntity(state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
-    spawnEntity(state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'bubble', 1, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
 
     updateEntities(ctx, state, events)
@@ -696,7 +746,7 @@ describe('updateEntities collision', () => {
     expect(events.some((e) => e.kind === 'spinOut')).toBe(false)
 
     // The next hit lands for real, because the shield is genuinely gone.
-    spawnEntity(state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, events)
     events.length = 0
     updateEntities(ctx, state, events)
     expect(victim.spinOutTicks).toBe(ctx.tuning.spinOutTicks)
@@ -705,24 +755,26 @@ describe('updateEntities collision', () => {
   it('takes the shield down when a bubble is despawned directly', () => {
     // Covering the call rather than the caller: every despawn path runs through
     // despawnEntityAt, which is why the clear lives there.
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
     state.karts[2].shielded = true
-    spawnEntity(state, 'bubble', 2, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'bubble', 2, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
 
-    despawnEntityAt(state, 0, events)
+    despawnEntityAt(ctx, state, 0, events)
 
     expect(state.karts[2].shielded).toBe(false)
     expect(state.entityCount).toBe(0)
   })
 
   it('does not touch shields when a non-bubble entity despawns', () => {
+    const ctx = stubContext()
     const state = blankState()
     const events: AuthEvent[] = []
     state.karts[2].shielded = true
-    spawnEntity(state, 'seeker', 2, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'seeker', 2, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
 
-    despawnEntityAt(state, 0, events)
+    despawnEntityAt(ctx, state, 0, events)
 
     expect(state.karts[2].shielded).toBe(true)
   })
@@ -752,9 +804,10 @@ describe('surgeActiveOn', () => {
   })
 
   it('slows only the karts placed ahead of the surge owner', () => {
+    const ctx = stubContext()
     const state = progressState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
+    spawnEntity(ctx, state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
 
     expect(surgeActiveOn(state, 2)).toBe(true) // place 0, ahead of p5's place 1
     expect(surgeActiveOn(state, 5)).toBe(false) // the owner is never slowed
@@ -763,22 +816,24 @@ describe('surgeActiveOn', () => {
   })
 
   it('ignores non-surge entities and out-of-range player ids', () => {
+    const ctx = stubContext()
     const state = progressState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'slick', 5, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
+    spawnEntity(ctx, state, 'slick', 5, { x: 0, y: 0, z: 0 }, 0, -1, 600, events)
     expect(surgeActiveOn(state, 2)).toBe(false)
 
-    spawnEntity(state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
+    spawnEntity(ctx, state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
     expect(surgeActiveOn(state, 2)).toBe(true)
     expect(surgeActiveOn(state, -1)).toBe(false)
     expect(surgeActiveOn(state, MAX_KARTS)).toBe(false) // 8
   })
 
   it('lets one surge owner be caught by another surge', () => {
+    const ctx = stubContext()
     const state = progressState()
     const events: AuthEvent[] = []
-    spawnEntity(state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events) // owner place 1
-    spawnEntity(state, 'surge', 0, { x: 0, y: 0, z: 0 }, 0, -1, 300, events) // owner place 2
+    spawnEntity(ctx, state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events) // owner place 1
+    spawnEntity(ctx, state, 'surge', 0, { x: 0, y: 0, z: 0 }, 0, -1, 300, events) // owner place 2
 
     expect(surgeActiveOn(state, 2)).toBe(true) // place 0: ahead of both
     expect(surgeActiveOn(state, 5)).toBe(true) // place 1: ahead of p0's surge
@@ -802,7 +857,7 @@ describe('kart.ts wiring', () => {
     // maxSpeed 40 * speed 1.00 * accel 1 * surface 1 * surge 1 * boost 1 = 40
     expect(targetSpeedFor(ctx, state, leader, 1)).toBe(40)
 
-    spawnEntity(state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
+    spawnEntity(ctx, state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
 
     // p2 is placed ahead of the caster p5, so the surge is on it:
     // 40 * 1.00 * 1 * 1 * 0.7 * 1, evaluated left to right, is exactly 28 in
@@ -825,7 +880,7 @@ describe('kart.ts wiring', () => {
 
     expect(targetSpeedFor(ctx, state, behind, 1)).toBe(40)
 
-    spawnEntity(state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
+    spawnEntity(ctx, state, 'surge', 5, { x: 0, y: 0, z: 0 }, 0, -1, 300, events)
 
     // A surge slows only the karts placed AHEAD of its caster, so p0's factor
     // stays 1 and its target speed does not move:
@@ -857,7 +912,7 @@ describe('step() wiring', () => {
     victim.position.z = 0
     // slick reach = 1.2 + kartRadius 0.9 = 2.1, and it sits 1.5 m away
     const spawnEvents: AuthEvent[] = []
-    spawnEntity(prev, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, spawnEvents)
+    spawnEntity(ctx, prev, 'slick', 0, { x: 1.5, y: 0, z: 0 }, 0, -1, 600, spawnEvents)
     prev.nextEventSeq = 0 // renumber from 0: the spawn event is not under test
 
     const inputs: Intent[] = []
@@ -888,5 +943,259 @@ describe('step() wiring', () => {
     expect(prev.karts[1].spinOutTicks).toBe(0)
     expect(prev.entities[0].ttl).toBe(600)
     expect(prev.tick).toBe(700)
+  })
+})
+
+describe('updateEntities hit events on a follower', () => {
+  it('resolves both hit branches identically, but announces nothing', () => {
+    const leaderCtx = stubContext()
+    const followerCtx = stubContext(false)
+    const leaderState = blankState()
+    const followerState = blankState()
+
+    // unshielded kart 2 and shielded kart 3, both parked far from everyone
+    // else, each sitting on its own long-lived slick (ttl 600, so this tick's
+    // ttl pass does not also despawn it -- entityDespawn's gating is proven
+    // separately, above).
+    for (const state of [leaderState, followerState]) {
+      state.karts[2].position.x = 200
+      state.karts[2].position.z = 0
+      state.karts[3].position.x = 250
+      state.karts[3].position.z = 0
+      state.karts[3].shielded = true
+    }
+    spawnEntity(leaderCtx, leaderState, 'slick', 7, { x: 200, y: 0, z: 0 }, 0, -1, 600, [])
+    spawnEntity(leaderCtx, leaderState, 'slick', 7, { x: 250, y: 0, z: 0 }, 0, -1, 600, [])
+    spawnEntity(followerCtx, followerState, 'slick', 7, { x: 200, y: 0, z: 0 }, 0, -1, 600, [])
+    spawnEntity(followerCtx, followerState, 'slick', 7, { x: 250, y: 0, z: 0 }, 0, -1, 600, [])
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    updateEntities(leaderCtx, leaderState, leaderEvents)
+    updateEntities(followerCtx, followerState, followerEvents)
+
+    expect(followerState.karts[2].spinOutTicks).toBe(leaderState.karts[2].spinOutTicks)
+    expect(followerState.karts[2].spinOutTicks).toBe(60)
+    expect(followerState.karts[3].shielded).toBe(leaderState.karts[3].shielded)
+    expect(followerState.karts[3].shielded).toBe(false)
+
+    const leaderHits = leaderEvents.filter((e) => e.kind === 'hit')
+    expect(leaderHits.length).toBe(2)
+    expect(leaderHits.map((e) => e.data).sort()).toEqual([0, 1])
+    expect(followerEvents.filter((e) => e.kind === 'hit').length).toBe(0)
+  })
+})
+
+describe('Task 2: follower parity across a full tick (the eight gated sites)', () => {
+  // stubContext's Track has itemBoxes: [], so updateItemBoxes never runs its
+  // leader-only roll this tick -- the one already-correctly-gated site is
+  // deliberately kept out of this test so it isolates exactly the eight sites
+  // this task gates. An item grant is a genuinely different case -- a
+  // follower cannot reproduce it locally at all, so the leader and follower
+  // SimStates diverge in more than nextEventSeq and the events array when one
+  // occurs. That case is covered on its own terms by the companion test
+  // below ('Task 2: follower parity for an item grant'), not here.
+  function parityPrevState(): SimState {
+    const state = blankState()
+    state.phase = 'racing'
+    state.tick = 100
+
+    // kart 0: out of bounds -> updateRecovery's beginRespawn -> 'respawn'
+    state.karts[0].position.x = 10
+    state.karts[0].position.z = 50 // |lateral| = 50 > isInBounds's 10
+
+    // kart 1: one tick from completing lap 3 -> updateLaps' 'lapCross' + 'finish'
+    state.karts[1].position.x = 4 // s = 0.01, inside checkpoint 0's [0, 0.25)
+    state.karts[1].position.z = 0
+    state.karts[1].lap = { lap: 2, checkpointIdx: 3, t: 0.99 }
+
+    // kart 2: unshielded, sits on a low-ttl slick -> 'hit' (data 0), 'spinOut',
+    // and that same slick's ttl expiry -> 'entityDespawn'
+    state.karts[2].position.x = 200
+    state.karts[2].position.z = 0
+
+    // kart 3: shielded, sits on a long-ttl slick -> 'hit' (data 1)
+    state.karts[3].position.x = 250
+    state.karts[3].position.z = 0
+    state.karts[3].shielded = true
+
+    // kart 4: holds a seeker and fires it -> useItem's spawnEntity -> 'entitySpawn'
+    state.karts[4].position.x = 300
+    state.karts[4].position.z = 0
+    state.karts[4].item = 'seeker'
+
+    // Two pre-placed entities, written directly rather than through
+    // spawnEntity (one of the things under test), so their ids are exact.
+    state.entityCount = 2
+    state.nextEntityId = 3
+    const e0 = state.entities[0] // kart 2's slick: ttl 1, expires this tick
+    e0.entityId = 1
+    e0.kind = 'slick'
+    e0.ownerId = 7
+    e0.position.x = 200
+    e0.position.y = 0
+    e0.position.z = 0
+    e0.ttl = 1
+    const e1 = state.entities[1] // kart 3's slick: ttl 600, survives this tick
+    e1.entityId = 2
+    e1.kind = 'slick'
+    e1.ownerId = 7
+    e1.position.x = 250
+    e1.position.y = 0
+    e1.position.z = 0
+    e1.ttl = 600
+
+    return state
+  }
+
+  function parityInputs(): Intent[] {
+    const inputs: Intent[] = []
+    for (let i = 0; i < MAX_KARTS; i++) {
+      inputs.push({ tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: i === 4 })
+    }
+    return inputs
+  }
+
+  it('mutates state identically to a leader for the eight gated sites, and only their announcements differ', () => {
+    const leaderCtx = stubContext(true)
+    const followerCtx = stubContext(false)
+    const prevLeader = parityPrevState()
+    const prevFollower = parityPrevState()
+    const nextLeader = parityPrevState() // shape-compatible scratch for step()'s cloneState
+    const nextFollower = parityPrevState()
+    const inputs = parityInputs()
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    step(leaderCtx, prevLeader, nextLeader, inputs, leaderEvents)
+    step(followerCtx, prevFollower, nextFollower, inputs, followerEvents)
+
+    // All eight of Task 2's gated sites fired on the leader, none on the follower.
+    expect(leaderEvents.length).toBe(8)
+    expect(followerEvents.length).toBe(0)
+    expect(leaderEvents.map((e) => e.kind).sort()).toEqual(
+      ['entityDespawn', 'entitySpawn', 'finish', 'hit', 'hit', 'lapCross', 'respawn', 'spinOut'].sort(),
+    )
+    expect(nextLeader.nextEventSeq).toBe(8)
+    expect(nextFollower.nextEventSeq).toBe(0)
+
+    // Every other field of SimState is identical -- true here because this
+    // scenario has no item box (see the top-of-describe comment), so
+    // nextEventSeq is the only field this equalises before borrowing
+    // statesEqual (state.ts; exhaustive and Object.is-strict). This is NOT a
+    // general claim that nextEventSeq/events are the only two things that can
+    // ever differ between a leader and a follower -- an item grant breaks
+    // that, which is exactly what the companion test below demonstrates.
+    const savedFollowerSeq = nextFollower.nextEventSeq
+    nextFollower.nextEventSeq = nextLeader.nextEventSeq
+    expect(statesEqual(nextLeader, nextFollower)).toBe(true)
+    nextFollower.nextEventSeq = savedFollowerSeq
+
+    // Name the mechanisms statesEqual just proved identical, so a regression
+    // here says which one moved, not just "false".
+    expect(nextFollower.karts[0].respawnTicks).toBe(72) // kart 0 respawned
+    expect(nextFollower.karts[1].lap.lap).toBe(3) // kart 1 finished lap 3
+    expect(nextFollower.finishedOrder[0]).toBe(1)
+    expect(nextFollower.karts[2].spinOutTicks).toBe(60) // kart 2 spun out
+    expect(nextFollower.entityCount).toBe(2) // slick 1 despawned, seeker spawned
+    expect(nextFollower.karts[3].shielded).toBe(false) // kart 3's shield absorbed a hit
+    expect(nextFollower.karts[4].item).toBe('none') // kart 4 spent its seeker
+  })
+})
+
+describe('Task 2: follower parity for an item grant', () => {
+  // Unlike the eight sites above, a follower cannot reproduce an item grant
+  // locally at all: rollItem (items.ts) returns 'none' on a follower and
+  // never advances state.rngCursor, because the race RNG stream is
+  // authority-only -- a follower's item instead arrives later, from the wire,
+  // via applyItemGrant (Task 13). So on a tick a kart reaches a box, a leader
+  // and a follower's SimState genuinely diverge in two fields beyond
+  // nextEventSeq: karts[i].item and rngCursor. This test proves that
+  // divergence is real, and that it is exactly those two fields plus
+  // nextEventSeq -- nothing else.
+  const BOX_S = 0.5 // this stub's 400 m loop: x = wrap01(0.5) * 400 = 200, z = lateral
+  const BOX_LATERAL = 0
+
+  function stubContextWithBox(isLeader: boolean): SimContext {
+    const ctx = stubContext(isLeader)
+    return { ...ctx, track: { ...ctx.track, itemBoxes: [{ s: BOX_S, lateral: BOX_LATERAL }] } }
+  }
+
+  function parityItemPrevState(): SimState {
+    const state = blankState()
+    state.phase = 'racing'
+    state.tick = 100
+    state.itemBoxes = [{ boxIdx: 0, respawnTicks: 0 }]
+    // kart 0 sits exactly on the box; every other kart stays at blankKart's
+    // default parking spot (x = 1000 + 10 * playerId), far from the box and
+    // from each other, so nothing but the grant fires this tick.
+    state.karts[0].position.x = 200
+    state.karts[0].position.z = 0
+    return state
+  }
+
+  function zeroInputs(): Intent[] {
+    const inputs: Intent[] = []
+    for (let i = 0; i < MAX_KARTS; i++) {
+      inputs.push({ tick: 0, steer: 0, accel: 0, brake: false, drift: false, useItem: false })
+    }
+    return inputs
+  }
+
+  it('grants an item on the leader only, diverging exactly karts[0].item and rngCursor', () => {
+    const leaderCtx = stubContextWithBox(true)
+    const followerCtx = stubContextWithBox(false)
+    const prevLeader = parityItemPrevState()
+    const prevFollower = parityItemPrevState()
+    const nextLeader = parityItemPrevState() // shape-compatible scratch for step()'s cloneState
+    const nextFollower = parityItemPrevState()
+    const inputs = zeroInputs()
+    const leaderEvents: AuthEvent[] = []
+    const followerEvents: AuthEvent[] = []
+
+    step(leaderCtx, prevLeader, nextLeader, inputs, leaderEvents)
+    step(followerCtx, prevFollower, nextFollower, inputs, followerEvents)
+
+    // The leader emitted exactly one itemGrant; the follower emitted nothing.
+    expect(leaderEvents.length).toBe(1)
+    expect(leaderEvents[0].kind).toBe('itemGrant')
+    expect(leaderEvents[0].playerId).toBe(0)
+    expect(followerEvents.length).toBe(0)
+    expect(nextLeader.nextEventSeq).toBe(1)
+    expect(nextFollower.nextEventSeq).toBe(0)
+
+    // The two fields that must diverge, asserted in both directions: the
+    // follower's stay at their pre-grant values, and the leader's move.
+    expect(nextFollower.karts[0].item).toBe('none')
+    expect(nextLeader.karts[0].item).not.toBe('none')
+    expect(nextFollower.rngCursor).toBe(0)
+    expect(nextLeader.rngCursor).toBe(1)
+
+    // Everything else matches. Equalise exactly those three fields
+    // (nextEventSeq, karts[0].item, rngCursor) -- no more -- and borrow
+    // statesEqual (state.ts; exhaustive, Object.is-strict) to prove the rest
+    // is identical. If any other field had also diverged (a fourth exception
+    // this test doesn't know about, or a narrower one than claimed), this
+    // would be false; if karts[0].item or rngCursor had matched without the
+    // explicit equalisation above (the follower wrongly rolling too), the two
+    // asserts just above would already have failed first.
+    const savedSeq = nextFollower.nextEventSeq
+    const savedItem = nextFollower.karts[0].item
+    const savedCursor = nextFollower.rngCursor
+    nextFollower.nextEventSeq = nextLeader.nextEventSeq
+    nextFollower.karts[0].item = nextLeader.karts[0].item
+    nextFollower.rngCursor = nextLeader.rngCursor
+    expect(statesEqual(nextLeader, nextFollower)).toBe(true)
+    nextFollower.nextEventSeq = savedSeq
+    nextFollower.karts[0].item = savedItem
+    nextFollower.rngCursor = savedCursor
+
+    // The box's own respawn timer is not part of the exception: updateItemBoxes
+    // starts it before the ctx.isLeader-gated roll, so it is set identically on
+    // both leader and follower -- already covered by statesEqual above, named
+    // explicitly here for the same reason the sibling test above names its
+    // mechanisms.
+    expect(nextFollower.itemBoxes[0].respawnTicks).toBe(nextLeader.itemBoxes[0].respawnTicks)
+    expect(nextFollower.itemBoxes[0].respawnTicks).toBeGreaterThan(0)
   })
 })
