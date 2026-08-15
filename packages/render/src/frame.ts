@@ -1,8 +1,17 @@
 // PURE (contract §0a): no DOM, no GPU, no clock, no `three` import, and nothing
-// in the frame path allocates. Task 12 adds buildRenderFrame to this file.
+// in the frame path allocates.
 import type { EntityKind, Vec3 } from '@tapkart/sim'
-import { MAX_ENTITIES, MAX_KARTS, v3 } from '@tapkart/sim'
-import type { PaletteRGB } from '@tapkart/content'
+import {
+  CHARGE_TTL_TICKS,
+  ITEM_BOOST_TICKS,
+  MAX_ENTITIES,
+  MAX_KARTS,
+  TICK_DT,
+  clamp,
+  v3,
+  wrapAngle,
+} from '@tapkart/sim'
+import type { CharacterDescriptor, KartDescriptor, PaletteRGB, TrackTheme } from '@tapkart/content'
 import type { CameraState } from './camera'
 import { createCameraState } from './camera'
 import type { RaceView } from './types'
@@ -182,4 +191,148 @@ export function surgeAffects(view: RaceView, playerId: number): boolean {
     if (mine < view.karts[e.ownerId].place) return true
   }
   return false
+}
+
+/** ttl in ticks over which a dropped hazard fades out. Contract §4.7 states
+ *  this row as `clamp(e.ttl / 30, 0, 1)`; the divisor is written once here. */
+const HAZARD_FADE_TICKS = 30
+
+/**
+ * THE pure function of this package. (RaceView, CameraState, TrackTheme,
+ * descriptors) -> RenderFrame. No clock, no DOM, no allocation, no randomness.
+ * SOLE WRITER of every RenderFrame field.
+ *
+ * It reads exactly two things out of `out`: `out.sourceTick` and
+ * `out.karts[i].wheelSpin`. Every other field of `out` is write-only. That is
+ * what makes wheel rotation frame-rate independent while keeping the function a
+ * deterministic function of (inputs, prior accumulator).
+ *
+ * `characters` and `karts` are both length 8, indexed by characterIdx (§4.4).
+ * Karts are filled BEFORE entities, because a bubble is reconstructed from its
+ * owner's already-resolved KartDraw.position (Q28).
+ */
+export function buildRenderFrame(
+  view: RaceView,
+  cam: CameraState,
+  theme: TrackTheme,
+  characters: readonly CharacterDescriptor[],
+  karts: readonly KartDescriptor[],
+  out: RenderFrame,
+): void {
+  // --- camera, copied by value: updateCamera keeps mutating `cam` after this
+  // frame has been handed to the backend.
+  out.camera.position.x = cam.position.x
+  out.camera.position.y = cam.position.y
+  out.camera.position.z = cam.position.z
+  out.camera.lookAt.x = cam.lookAt.x
+  out.camera.lookAt.y = cam.lookAt.y
+  out.camera.lookAt.z = cam.lookAt.z
+  out.camera.up.x = cam.up.x
+  out.camera.up.y = cam.up.y
+  out.camera.up.z = cam.up.z
+  out.camera.fovDegrees = cam.fovDegrees
+  out.camera.mode = cam.mode
+
+  // Sim ticks elapsed since this frame's accumulators were last advanced. Never
+  // negative: a view that goes backwards (a reset, a rejoin) holds the wheels.
+  const dt = Math.max(0, view.tick - out.sourceTick)
+  const flickerOn =
+    view.tick % INVULN_FLICKER_PERIOD_TICKS >= INVULN_FLICKER_PERIOD_TICKS / 2
+
+  // --- karts, by seat
+  const kartDescCount = karts.length
+  const charDescCount = characters.length
+  for (let i = 0; i < MAX_KARTS; i++) {
+    const k = view.karts[i]
+    const d = out.karts[i]
+    // The frame path must be total: a descriptor index is clamped rather than
+    // trusted, so a malformed session cannot throw inside the render loop.
+    const kd = karts[clamp(Math.trunc(k.characterIdx), 0, kartDescCount - 1)]
+
+    d.playerId = k.playerId
+    d.characterIdx = k.characterIdx
+    d.visible = k.source !== 'absent'
+    d.position.x = k.position.x
+    d.position.y = k.position.y
+    d.position.z = k.position.z
+    d.heading = k.heading
+    d.roll =
+      k.bankAngle +
+      (k.driftActive ? KART_DRIFT_LEAN_RADIANS * k.driftDir : 0) +
+      (k.spinOutTicks > 0 ? KART_SPINOUT_ROLL_RADIANS : 0)
+    d.wheelSpin = wrapAngle(d.wheelSpin + (k.speed / kd.wheelRadius) * TICK_DT * dt)
+    d.steerAngle =
+      clamp(k.angularVelocity / KART_STEER_VISUAL_YAW_RATE, -1, 1) *
+      KART_STEER_VISUAL_MAX_RADIANS
+    d.bodyTint = kd.palette.body
+    d.alpha = k.invulnTicks > 0 && flickerOn ? INVULN_FLICKER_ALPHA : 1
+    d.driftSparkTier = k.driftTier
+    d.boostFlame = clamp(k.boostTicks / ITEM_BOOST_TICKS, 0, 1)
+    d.shieldVisible = k.shielded
+  }
+
+  // --- entities, after karts
+  for (let j = 0; j < MAX_ENTITIES; j++) {
+    const e = view.entities[j]
+    const d = out.entities[j]
+    const live = j < view.entityCount
+    const ownerSeat = e.ownerId >= 0 && e.ownerId < MAX_KARTS ? e.ownerId : -1
+
+    d.entityId = e.entityId
+    d.kind = e.kind
+    d.visible = live && e.kind !== 'surge'
+    if (live && e.kind === 'bubble' && ownerSeat >= 0) {
+      // Q28: rebuild from the owner's DRAWN position and the interpolated
+      // heading. Lerping the sampled positions chords across the orbit.
+      bubblePosition(out.karts[ownerSeat].position, e.heading, d.position)
+    } else {
+      d.position.x = e.position.x
+      d.position.y = e.position.y
+      d.position.z = e.position.z
+    }
+    d.heading = e.heading
+    d.scale = ENTITY_SCALE[e.kind]
+    d.tint =
+      ownerSeat >= 0
+        ? characters[
+            clamp(Math.trunc(view.karts[ownerSeat].characterIdx), 0, charDescCount - 1)
+          ].palette.accent
+        : theme.edgeMarkers.colors[0]
+    d.alpha =
+      e.kind === 'slick' || e.kind === 'charge' ? clamp(e.ttl / HAZARD_FADE_TICKS, 0, 1) : 1
+  }
+  out.entityCount = view.entityCount
+
+  // --- item boxes (Q29): ghosted, never hidden
+  const denom = view.itemBoxRespawnTicks
+  const boxCount = Math.min(out.itemBoxAlpha.length, view.itemBoxes.length)
+  for (let b = 0; b < boxCount; b++) {
+    out.itemBoxAlpha[b] =
+      denom > 0 ? clamp(1 - view.itemBoxes[b].respawnTicks / denom, 0, 1) : 1
+  }
+
+  // --- screen effects
+  const pid = view.localPlayerId
+  const hasSeat = pid >= 0 && pid < MAX_KARTS
+  let flash = 0
+  if (hasSeat) {
+    const lp = out.karts[pid].position
+    for (let j = 0; j < view.entityCount; j++) {
+      const e = view.entities[j]
+      if (e.kind !== 'charge') continue
+      const dx = e.position.x - lp.x
+      const dy = e.position.y - lp.y
+      const dz = e.position.z - lp.z
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      const v =
+        clamp(1 - dist / CHARGE_FLASH_RADIUS_M, 0, 1) * clamp(e.ttl / CHARGE_TTL_TICKS, 0, 1)
+      if (v > flash) flash = v
+    }
+  }
+  out.screenFlash = flash
+  out.screenTintColor = SURGE_TINT
+  out.screenTintAmount = hasSeat && surgeAffects(view, pid) ? SURGE_TINT_AMOUNT : 0
+
+  // Last (§4.7): every wheelSpin above consumed the OLD value.
+  out.sourceTick = view.tick
 }
