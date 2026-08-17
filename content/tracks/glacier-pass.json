@@ -448,7 +448,7 @@
         "y": 2,
         "z": 21.64
       },
-      "width": 21,
+      "width": 15,
       "banking": 0.16,
       "surface": "tarmac"
     },
@@ -458,7 +458,7 @@
         "y": 1,
         "z": 0
       },
-      "width": 21,
+      "width": 15,
       "banking": 0.25,
       "surface": "tarmac"
     },
@@ -468,7 +468,7 @@
         "y": 0,
         "z": -21.64
       },
-      "width": 21.2,
+      "width": 15,
       "banking": 0.12,
       "surface": "tarmac"
     }
