@@ -12,7 +12,8 @@
     "@tapkart/protocol": "*",
     "@tapkart/net": "*",
     "@tapkart/content": "*",
-    "@tapkart/render": "*"
+    "@tapkart/render": "*",
+    "@tapkart/invite": "*"
   },
   "devDependencies": {
     "vite": "^7.0.0"

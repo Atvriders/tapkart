@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./three": "./src/three/renderer.ts"
+    "./three": "./src/three/renderer.ts",
+    "./web-audio": "./src/audio/web.ts"
   },
   "dependencies": {
     "@tapkart/sim": "*",

@@ -12,6 +12,10 @@ import type {
   TickAccumulator,
   // transport [Task 11]
   Transport,
+  // socket [Plan 4]
+  SocketData,
+  SocketLike,
+  SocketReadyState,
   // loopback [Task 12]
   LoopbackOptions,
   // client [Tasks 15, 15b]
@@ -22,6 +26,37 @@ import type {
   LocalInputTransport,
   // receive [Task 15b]
   DatagramGuard,
+  // wsframe [Plan 4 Task 8]
+  WsFrame,
+  // websocket [Plan 4 Task 9]
+  WebSocketTransport,
+  WebSocketTransportOptions,
+  // signal [Plan 4 Task 10]
+  SignalEnvelope,
+  SignalMessage,
+  // webrtc [Plan 4 Task 11]
+  IceCandidateInit,
+  IceServerConfig,
+  RtcChannelInit,
+  RtcConnectionFactory,
+  RtcConnectionLike,
+  RtcConnectionState,
+  RtcDataChannelLike,
+  WebRtcTransport,
+  WebRtcTransportOptions,
+  // liveness [Plan 4 Task 13]
+  LivenessState,
+  // fanout [Plan 4 Task 11b]
+  FanOutPart,
+  FanOutTransport,
+  // authz [Plan 4 Task 12]
+  PeerAuthority,
+  PeerAuthorityDrops,
+  // roomclient [Plan 4 Task 14]
+  RoomClientOptions,
+  RoomClientState,
+  RoomClientUpdate,
+  RoomPhase,
 } from '../src/index'
 import {
   AUTHORITY_CHANGE_BYTES,
@@ -47,14 +82,28 @@ import { ShadowLoop as ShadowLoopDirect } from '../src/shadow'
 // from the ESM namespace object, so a check that derived its expectations from
 // the barrel would be inspecting evidence the ambiguity has already destroyed.
 import * as applyNs from '../src/apply'
+import * as authzNs from '../src/authz'
 import * as authorityNs from '../src/authority'
 import * as clientNs from '../src/client'
 import * as clockNs from '../src/clock'
+import * as fanoutNs from '../src/fanout'
+import * as livenessNs from '../src/liveness'
 import * as localNs from '../src/local'
 import * as loopbackNs from '../src/loopback'
 import * as receiveNs from '../src/receive'
+import * as roomclientNs from '../src/roomclient'
+import * as signalNs from '../src/signal'
 import * as shadowNs from '../src/shadow'
+import * as socketNs from '../src/socket'
 import * as transportNs from '../src/transport'
+import * as webrtcNs from '../src/webrtc'
+import * as websocketNs from '../src/websocket'
+import * as wsframeNs from '../src/wsframe'
+// Imported ONLY so this file can assert that not one of their names is
+// reachable through the barrel. These two are the only files in `net` that name
+// a DOM global.
+import * as webrtcBrowserNs from '../src/webrtc-browser'
+import * as websocketBrowserNs from '../src/websocket-browser'
 
 // Imported so this file can assert, by name, that not one of them is reachable
 // through the barrel. Fixtures shipping in the public surface is how they end up
@@ -62,8 +111,11 @@ import * as transportNs from '../src/transport'
 import * as goldenFixtureNs from './fixtures/golden-net'
 import * as meshFixtureNs from './fixtures/mesh'
 import * as netFixtureNs from './fixtures/net-fixtures'
+import * as rtcFixtureNs from './fixtures/rtc-fixtures'
 import * as scriptedFixtureNs from './fixtures/scripted-input'
+import * as socketFixtureNs from './fixtures/socket-fixtures'
 import * as spyFixtureNs from './fixtures/spy-transport'
+import * as conformanceFixtureNs from './fixtures/transport-conformance'
 import { makeNetContext } from './fixtures/net-fixtures'
 
 const HERE = dirname(fileURLToPath(import.meta.url)) // packages/net/test
@@ -93,6 +145,9 @@ const SURFACE: Record<string, string[]> = {
   // `types` exception, which at least had constants. The `export *` line is
   // still required and still checked below; it just carries no runtime name.
   transport: [],
+  // [Plan 4] the three application close codes. SocketLike, SocketData and
+  // SocketReadyState are types and contribute nothing at runtime.
+  socket: ['WS_CLOSE_BACKPRESSURE', 'WS_CLOSE_ROOM_CLOSED', 'WS_CLOSE_VERSION_MISMATCH'],
   // [Task 12]
   loopback: ['makeLoopbackPair'],
   // [Task 13]
@@ -148,16 +203,74 @@ const SURFACE: Record<string, string[]> = {
     'eventCursorPlausible',
     'tickCursorPlausible',
   ],
+  // [Plan 4 Task 8] the transport's private three-byte envelope.
+  wsframe: [
+    'WS_CHANNEL_RELIABLE',
+    'WS_CHANNEL_UNRELIABLE',
+    'WS_CONTROL_PEER_GONE',
+    'WS_CONTROL_PEER_JOINED',
+    'WS_FRAME_CONTROL',
+    'WS_FRAME_DATA',
+    'WS_HEADER_BYTES',
+    'WS_SLOT_BROADCAST',
+    'WS_SLOT_SERVER',
+    'byteOfChannel',
+    'channelOfByte',
+    'decodeWsFrame',
+    'encodeWsControl',
+    'encodeWsData',
+  ],
+  // [Plan 4 Task 9] one socket, many peers behind it.
+  websocket: ['WS_MAX_BUFFERED_BYTES', 'WS_MAX_RELIABLE_BUFFERED_BYTES', 'makeWebSocketTransport'],
+  // [Plan 4 Task 10] JSON over text frames, beside the binary channel.
+  signal: ['SIGNAL_MAX_BYTES', 'SIGNAL_VERSION', 'encodeSignal', 'parseSignal'],
+  // [Plan 4 Task 11] one link to one peer, pure over RtcConnectionLike.
+  webrtc: [
+    'DEFAULT_ICE_SERVERS',
+    'RTC_CHANNEL_INIT',
+    'RTC_CONNECT_TIMEOUT_MS',
+    'RTC_QUEUE_MAX',
+    'makeWebRtcTransport',
+  ],
+  // [Plan 4 §4.8] peer liveness only - there is no HostWatch and no hostLost
+  // (F-P4-22 puts the one host-loss detector inside ShadowLoop.tick).
+  liveness: [
+    'PEER_STALE_MS',
+    'PING_INTERVAL_MS',
+    'createLiveness',
+    'isStale',
+    'notePacket',
+    'notePingSent',
+    'notePong',
+    'shouldSendPing',
+  ],
+  // [Plan 4 Task 11b] two transports, one Transport.
+  fanout: ['PEER_ID_SEPARATOR', 'makeFanOutTransport', 'scopePeerId', 'splitPeerId'],
+  // [Plan 4 §4.7]
+  authz: ['peerAuthorityDropsOf', 'withPeerAuthority'],
+  // [Plan 4 §4.9]
+  roomclient: ['HARD_RESYNC_LIMIT', 'HARD_RESYNC_WINDOW_TICKS', 'RoomClient'],
 }
 
 /** The barrel's `export *` lines, in the order src/index.ts lists them. */
 const BARREL_MODULES = [
-  'clock', 'transport', 'loopback', 'apply', 'authority', 'client', 'shadow', 'local', 'receive',
+  'clock', 'transport', 'socket', 'loopback', 'apply', 'authority', 'client', 'shadow', 'local', 'receive',
+  'wsframe', 'websocket', 'signal', 'webrtc', 'liveness', 'fanout', 'authz', 'roomclient',
 ]
+
+/**
+ * In src/ and DELIBERATELY NOT on the barrel (contract §0, §4.11). Each is an
+ * ADAPTER naming a DOM global, and `packages/server` imports this barrel: a
+ * `export * from './webrtc-browser'` line would put `RTCPeerConnection` on the
+ * import path of a headless Node process. Listed rather than filtered by name
+ * pattern, so adding a third one is a decision somebody makes here.
+ */
+const UNBARRELLED_MODULES = ['webrtc-browser', 'websocket-browser']
 
 const NAMESPACES: [string, object][] = [
   ['clock', clockNs],
   ['transport', transportNs],
+  ['socket', socketNs],
   ['loopback', loopbackNs],
   ['apply', applyNs],
   ['authority', authorityNs],
@@ -165,6 +278,14 @@ const NAMESPACES: [string, object][] = [
   ['shadow', shadowNs],
   ['local', localNs],
   ['receive', receiveNs],
+  ['wsframe', wsframeNs],
+  ['websocket', websocketNs],
+  ['signal', signalNs],
+  ['webrtc', webrtcNs],
+  ['liveness', livenessNs],
+  ['fanout', fanoutNs],
+  ['authz', authzNs],
+  ['roomclient', roomclientNs],
 ]
 
 /** Every module under test/, which must contribute nothing to the surface. */
@@ -172,8 +293,11 @@ const FIXTURES: [string, object][] = [
   ['fixtures/golden-net', goldenFixtureNs],
   ['fixtures/mesh', meshFixtureNs],
   ['fixtures/net-fixtures', netFixtureNs],
+  ['fixtures/rtc-fixtures', rtcFixtureNs],
   ['fixtures/scripted-input', scriptedFixtureNs],
+  ['fixtures/socket-fixtures', socketFixtureNs],
   ['fixtures/spy-transport', spyFixtureNs],
+  ['fixtures/transport-conformance', conformanceFixtureNs],
 ]
 
 /**
@@ -187,22 +311,74 @@ const FIXTURES: [string, object][] = [
 interface NetTypeSurface {
   TickAccumulator: TickAccumulator
   Transport: Transport
+  SocketData: SocketData
+  SocketLike: SocketLike
+  SocketReadyState: SocketReadyState
   LoopbackOptions: LoopbackOptions
   RemoteKeyframe: RemoteKeyframe
   RemoteSample: RemoteSample
   RemoteEntitySample: RemoteEntitySample
   LocalInputTransport: LocalInputTransport
   DatagramGuard: DatagramGuard
+  WsFrame: WsFrame
+  WebSocketTransport: WebSocketTransport
+  WebSocketTransportOptions: WebSocketTransportOptions
+  SignalEnvelope: SignalEnvelope
+  SignalMessage: SignalMessage
+  IceCandidateInit: IceCandidateInit
+  IceServerConfig: IceServerConfig
+  RtcChannelInit: RtcChannelInit
+  RtcConnectionFactory: RtcConnectionFactory
+  RtcConnectionLike: RtcConnectionLike
+  RtcConnectionState: RtcConnectionState
+  RtcDataChannelLike: RtcDataChannelLike
+  WebRtcTransport: WebRtcTransport
+  WebRtcTransportOptions: WebRtcTransportOptions
+  FanOutPart: FanOutPart
+  FanOutTransport: FanOutTransport
+  LivenessState: LivenessState
+  PeerAuthority: PeerAuthority
+  PeerAuthorityDrops: PeerAuthorityDrops
+  RoomPhase: RoomPhase
+  RoomClientState: RoomClientState
+  RoomClientOptions: RoomClientOptions
+  RoomClientUpdate: RoomClientUpdate
 }
 const TYPE_SURFACE: Record<keyof NetTypeSurface, true> = {
   TickAccumulator: true,
   Transport: true,
+  SocketData: true,
+  SocketLike: true,
+  SocketReadyState: true,
   LoopbackOptions: true,
   RemoteKeyframe: true,
   RemoteSample: true,
   RemoteEntitySample: true,
   LocalInputTransport: true,
   DatagramGuard: true,
+  WsFrame: true,
+  WebSocketTransport: true,
+  WebSocketTransportOptions: true,
+  SignalEnvelope: true,
+  SignalMessage: true,
+  IceCandidateInit: true,
+  IceServerConfig: true,
+  RtcChannelInit: true,
+  RtcConnectionFactory: true,
+  RtcConnectionLike: true,
+  RtcConnectionState: true,
+  RtcDataChannelLike: true,
+  WebRtcTransport: true,
+  WebRtcTransportOptions: true,
+  FanOutPart: true,
+  FanOutTransport: true,
+  LivenessState: true,
+  PeerAuthority: true,
+  PeerAuthorityDrops: true,
+  RoomPhase: true,
+  RoomClientState: true,
+  RoomClientOptions: true,
+  RoomClientUpdate: true,
 }
 
 const expectedNames = (): string[] => Object.values(SURFACE).flat().sort()
@@ -258,7 +434,8 @@ describe('@tapkart/net barrel', () => {
       .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
       .map((f) => f.slice(0, -3))
       .sort()
-    expect(onDisk, 'a module was added to src/ without a line in the barrel').toEqual([...BARREL_MODULES].sort())
+    expect(onDisk, 'a module was added to src/ without a decision about the barrel')
+      .toEqual([...BARREL_MODULES, ...UNBARRELLED_MODULES].sort())
 
     const barrel = readFileSync(join(SRC, 'index.ts'), 'utf8')
     for (const name of BARREL_MODULES) {
@@ -270,10 +447,32 @@ describe('@tapkart/net barrel', () => {
       .toHaveLength(BARREL_MODULES.length)
   })
 
+  it('cannot reach a DOM global through the public barrel', () => {
+    const surface = new Set(Object.keys(net))
+    for (const [mod, ns] of [
+      ['webrtc-browser', webrtcBrowserNs],
+      ['websocket-browser', websocketBrowserNs],
+    ] as [string, object][]) {
+      const names = Object.keys(ns)
+      expect(names.length, `${mod} exports nothing, so this check proves nothing`).toBeGreaterThan(0)
+      for (const name of names) {
+        expect(surface.has(name), `${mod}.${name} is reachable through the public barrel`).toBe(false)
+      }
+      expect(BARREL_MODULES).not.toContain(mod)
+    }
+    const barrel = readFileSync(join(SRC, 'index.ts'), 'utf8')
+    expect(barrel).not.toContain('-browser')
+  })
+
   it('pins the type-only surface at compile time', () => {
     expect(Object.keys(TYPE_SURFACE).sort()).toEqual([
-      'DatagramGuard', 'LocalInputTransport', 'LoopbackOptions', 'RemoteEntitySample',
-      'RemoteKeyframe', 'RemoteSample', 'TickAccumulator', 'Transport',
+      'DatagramGuard', 'FanOutPart', 'FanOutTransport', 'IceCandidateInit', 'IceServerConfig',
+      'LivenessState', 'LocalInputTransport', 'LoopbackOptions', 'PeerAuthority', 'PeerAuthorityDrops',
+      'RemoteEntitySample', 'RemoteKeyframe', 'RemoteSample', 'RoomClientOptions', 'RoomClientState',
+      'RoomClientUpdate', 'RoomPhase', 'RtcChannelInit', 'RtcConnectionFactory', 'RtcConnectionLike',
+      'RtcConnectionState', 'RtcDataChannelLike', 'SignalEnvelope', 'SignalMessage', 'SocketData',
+      'SocketLike', 'SocketReadyState', 'TickAccumulator', 'Transport', 'WebRtcTransport',
+      'WebRtcTransportOptions', 'WebSocketTransport', 'WebSocketTransportOptions', 'WsFrame',
     ])
   })
 

@@ -1,12 +1,5 @@
-import type { ControlInputs, PointerPhase, TiltSample, Viewport } from './types'
+import type { ControlInputs, InputSource, PointerPhase, TiltSample, Viewport } from './types'
 import { MAX_POINTERS } from './types'
-
-export interface InputSource {
-  /** Copies everything accumulated since the last call into `out`, then clears its
-   *  own accumulator. Never allocates: `out.pointers` is reused. */
-  drain(out: ControlInputs): void
-  detach(): void
-}
 
 /**
  * Attaches pointer, key and deviceorientation listeners. The ONLY file in
@@ -76,6 +69,7 @@ export function attachInputSource(target: EventTarget, viewport: Viewport): Inpu
   const onOrientation = (e: Event): void => {
     const d = e as DeviceOrientationEvent
     if (d.alpha === null || d.beta === null || d.gamma === null) return
+    if (!Number.isFinite(d.alpha) || !Number.isFinite(d.beta) || !Number.isFinite(d.gamma)) return
     tiltScratch.alpha = d.alpha
     tiltScratch.beta = d.beta
     tiltScratch.gamma = d.gamma
@@ -110,6 +104,14 @@ export function attachInputSource(target: EventTarget, viewport: Viewport): Inpu
       out.tilt = haveTilt ? tiltScratch : null
       out.viewport.width = viewport.width
       out.viewport.height = viewport.height
+    },
+
+    snapshotTilt(out: TiltSample): boolean {
+      if (!haveTilt) return false
+      out.alpha = tiltScratch.alpha
+      out.beta = tiltScratch.beta
+      out.gamma = tiltScratch.gamma
+      return true
     },
 
     detach(): void {

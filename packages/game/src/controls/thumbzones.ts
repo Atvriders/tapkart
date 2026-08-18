@@ -8,6 +8,7 @@ import {
   driftButtonRect,
   itemButtonRect,
   rectContains,
+  steeringZoneRect,
 } from './config'
 
 /**
@@ -30,6 +31,7 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
   // Scratch, allocated once. Nothing below allocates per tick.
   const driftRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const itemRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const steeringRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
 
   let steerId = -1
   let driftId = -1
@@ -52,6 +54,7 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
     sample(raw: ControlInputs, tick: number, out: Intent): void {
       driftButtonRect(raw.viewport, driftRect)
       itemButtonRect(raw.viewport, itemRect)
+      steeringZoneRect(raw.viewport, steeringRect)
 
       let itemPulse = false
 
@@ -65,7 +68,7 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
               itemId = p.id
               itemPulse = true // Q25: one-tick pulse on the press edge
             }
-          } else if (steerId === -1 && p.x < raw.viewport.width * 0.5) {
+          } else if (steerId === -1 && rectContains(steeringRect, p.x, p.y)) {
             steerId = p.id
             originX = p.x
             currentX = p.x

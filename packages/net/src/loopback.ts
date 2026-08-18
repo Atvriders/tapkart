@@ -53,9 +53,9 @@ export function makeLoopbackPair(
       const jitterRoll = rngAt(seed, cursor + 1)
       cursor += 2
       if (lossRoll < lossRate) return
-      pending.push({ from, channel, data, deliverAt: lastNow + latencyMs + jitterRoll * jitterMs })
+      pending.push({ from, channel, data: data.slice(), deliverAt: lastNow + latencyMs + jitterRoll * jitterMs })
     } else {
-      pending.push({ from, channel, data, deliverAt: lastNow + latencyMs })
+      pending.push({ from, channel, data: data.slice(), deliverAt: lastNow + latencyMs })
     }
   }
 
@@ -64,12 +64,12 @@ export function makeLoopbackPair(
     const messageCbs = self === 'a' ? aMessageCbs : bMessageCbs
     const peerLostCbs = self === 'a' ? aPeerLostCbs : bPeerLostCbs
     return {
-      send(channel, _peerId, data) {
-        if (isClosed(self)) return
+      send(channel, peerId, data) {
+        if (isClosed(self) || isClosed(other) || peerId !== other) return
         enqueue(self, channel, data)
       },
       broadcast(channel, data) {
-        if (isClosed(self)) return
+        if (isClosed(self) || isClosed(other)) return
         enqueue(self, channel, data)
       },
       onMessage(cb) {
@@ -83,8 +83,17 @@ export function makeLoopbackPair(
         return isClosed(other) ? [] : [other]
       },
       close() {
+        if (isClosed(self)) return
         if (self === 'a') aClosed = true
         else bClosed = true
+        // One pair is one link, so closing either side invalidates every
+        // datagram queued in either direction. The far side stays usable as an
+        // object but has no peer, and learns about the vanished peer once.
+        pending.length = 0
+        if (!isClosed(other)) {
+          const farPeerLostCbs = other === 'a' ? aPeerLostCbs : bPeerLostCbs
+          for (const cb of [...farPeerLostCbs]) cb(self)
+        }
       },
     }
   }
@@ -105,9 +114,9 @@ export function makeLoopbackPair(
     ready.sort((x, y) => x.deliverAt - y.deliverAt)
     for (const m of ready) {
       const destination: Side = m.from === 'a' ? 'b' : 'a'
-      if (isClosed(destination)) continue
+      if (isClosed(m.from) || isClosed(destination)) continue
       const cbs = destination === 'a' ? aMessageCbs : bMessageCbs
-      for (const cb of cbs) cb(m.from, m.channel, m.data)
+      for (const cb of [...cbs]) cb(m.from, m.channel, m.data)
     }
   }
 

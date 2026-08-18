@@ -6,8 +6,9 @@ import type {
 import type { EntityKind, Intent, ItemKind, Surface } from '@tapkart/sim'
 
 describe('protocol wire types', () => {
-  it('fixes PROTOCOL_VERSION at 1', () => {
-    expect(PROTOCOL_VERSION).toBe(1)
+  it('fixes PROTOCOL_VERSION at 2', () => {
+    // The bump itself, and why, are pinned in test/version.test.ts.
+    expect(PROTOCOL_VERSION).toBe(2)
   })
 
   it('accepts exactly the two channel names the contract fixes', () => {
@@ -27,7 +28,7 @@ describe('protocol wire types', () => {
     for (const kind of kinds) {
       const h: WireHeader = { kind, protocolVersion: PROTOCOL_VERSION }
       expect(h.kind).toBe(kind)
-      expect(h.protocolVersion).toBe(1)
+      expect(h.protocolVersion).toBe(2)
     }
   })
 
@@ -184,6 +185,6 @@ describe('WIRE_TAG, encodeHeader, decodeHeader', () => {
 describe('@tapkart/protocol barrel', () => {
   it('resolves through the package entry point', async () => {
     const pkg = await import('@tapkart/protocol')
-    expect(pkg.PROTOCOL_VERSION).toBe(1)
+    expect(pkg.PROTOCOL_VERSION).toBe(2)
   })
 })

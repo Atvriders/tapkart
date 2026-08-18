@@ -22,6 +22,8 @@ export interface SessionOptions {
   seed: number
   /** Exactly MAX_KARTS entries. Copied, never retained. */
   characterIdx: number[]
+  /** Server-authored connected-human seats. Omitted by legacy solo/test callers. */
+  humanMask?: number
   /** Host and solo require the LocalInputTransport extension. */
   transport: Transport
 }
@@ -41,6 +43,8 @@ export interface RaceSession {
   remoteEntityIds(out: Int32Array): number
   corrections(): number
   correctionDelta(outPos: Vec3): number | null
+  onHardResync(cb: (tick: number) => void): void
+  hardResyncs(): number
   currentView(): RaceView
   prevView(): RaceView
   swapViews(): void
@@ -78,6 +82,9 @@ class Session implements RaceSession {
 
     if (opts.role === 'guest') {
       const client = new ClientLoop(opts.ctx, opts.localPlayerId, opts.transport)
+      if (opts.humanMask !== undefined) {
+        client.beginRace(opts.seed, opts.characterIdx.slice(), opts.humanMask)
+      }
       this.client = client
       this.interp = remoteInterpolatorOf(client)
       this.authority = null
@@ -85,6 +92,15 @@ class Session implements RaceSession {
       this.live = client.state()
     } else {
       const state = createState(opts.ctx, opts.seed, opts.characterIdx.slice())
+      if (opts.humanMask !== undefined) {
+        for (let i = 0; i < MAX_KARTS; i++) {
+          const human = ((opts.humanMask >>> i) & 1) === 1
+          state.karts[i].isBot = !human
+          state.karts[i].connected = human
+        }
+      }
+      // The server always includes the local seat. Keep the composition seam
+      // safe if a malformed mask omits it, matching ClientLoop.beginRace.
       state.karts[opts.localPlayerId].isBot = false
       state.karts[opts.localPlayerId].connected = true
       this.live = state
@@ -167,6 +183,14 @@ class Session implements RaceSession {
       return null
     }
     return correctionDeltaOf(client, outPos)
+  }
+
+  onHardResync(cb: (tick: number) => void): void {
+    this.client?.onHardResync(cb)
+  }
+
+  hardResyncs(): number {
+    return this.client?.hardResyncs() ?? 0
   }
 
   currentView(): RaceView {

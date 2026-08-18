@@ -3,6 +3,7 @@ import { MAX_KARTS } from '@tapkart/sim'
 import type { ViewRole } from '@tapkart/render'
 import { CHARACTERS, TRACK_MANIFEST } from '@tapkart/content'
 import { ROOM_CODE_LENGTH, isValidRoomCode, normalizeRoomCode } from '@tapkart/protocol'
+import type { PeerRole } from '@tapkart/protocol'
 import type { ResultRow } from './results'
 import type { Settings } from './settings'
 
@@ -30,22 +31,30 @@ export interface AppState {
   results: ResultRow[]
   error: string
   connecting: boolean
+  serverLost: boolean
 }
+
+export const SERVER_LOST_RACE_WARNING =
+  'Server connection lost. This race can finish directly, but the room cannot continue.'
+export const SERVER_LOST_RECOVERY_MESSAGE =
+  'The race finished, but the room could not continue because the server connection was lost.'
 
 export type AppEvent =
   | { kind: 'hostPressed' }
   | { kind: 'joinPressed' }
   | { kind: 'soloPressed' }
   | { kind: 'roomCodeEntered'; code: string }
-  | { kind: 'connected'; roomCode: string; localPlayerId: number }
+  | { kind: 'connected'; roomCode: string; localPlayerId: number; role: PeerRole }
   | { kind: 'connectFailed'; message: string }
-  | { kind: 'lobbyUpdated'; slots: LobbySlot[] }
+  | { kind: 'lobbyUpdated'; slots: LobbySlot[]; trackId: string }
   | { kind: 'characterChosen'; characterIdx: number }
   | { kind: 'trackChosen'; trackId: string }
   | { kind: 'settingsChanged'; settings: Settings }
   | { kind: 'raceStarting' }
   | { kind: 'raceTick'; phase: RacePhase; finishedOrder: readonly number[] }
   | { kind: 'raceFinished'; results: ResultRow[] }
+  | { kind: 'serverLostDuringRace' }
+  | { kind: 'serverStartReceived' }
   | { kind: 'backToLobby' }
   | { kind: 'quitToTitle' }
 
@@ -64,16 +73,38 @@ export const SCREEN_TRANSITIONS: Readonly<Record<ScreenId, readonly AppEvent['ki
     'connectFailed', 'settingsChanged', 'quitToTitle',
   ],
   race: [
-    'raceTick', 'raceFinished', 'lobbyUpdated', 'connectFailed',
+    'raceTick', 'raceFinished', 'serverLostDuringRace', 'serverStartReceived',
+    'lobbyUpdated', 'connectFailed',
     'settingsChanged', 'quitToTitle',
   ],
   results: [
-    'backToLobby', 'lobbyUpdated', 'connectFailed',
+    'serverLostDuringRace', 'serverStartReceived', 'backToLobby', 'lobbyUpdated', 'connectFailed',
     'settingsChanged', 'quitToTitle',
   ],
 }
 
 const ROOM_CODE_ERROR = 'Enter a ' + ROOM_CODE_LENGTH + '-character room code.'
+
+function isKnownTrack(trackId: string): boolean {
+  for (const entry of TRACK_MANIFEST) {
+    if (entry.id === trackId) return true
+  }
+  return false
+}
+
+export function canRequestStart(state: AppState): boolean {
+  return state.screen === 'lobby' && state.role !== 'guest'
+}
+
+export function canChooseTrack(state: AppState): boolean {
+  return state.screen === 'lobby' && state.role !== 'guest'
+}
+
+/** NFC/App-Link invites are accepted only while the player is choosing how to
+ * enter a game. A host or an in-flight join must never be silently replaced. */
+export function canAcceptInvite(state: AppState): boolean {
+  return state.screen === 'title' && !state.connecting && state.role !== 'host'
+}
 
 function emptySlot(): LobbySlot {
   return {
@@ -120,6 +151,7 @@ export function createAppState(settings: Settings): AppState {
     results: [],
     error: '',
     connecting: false,
+    serverLost: false,
   }
 }
 
@@ -144,6 +176,7 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
         localPlayerId: 0,
         connecting: false,
         error: '',
+        serverLost: false,
       }
 
     case 'roomCodeEntered': {
@@ -158,10 +191,12 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
       return {
         ...prev,
         screen: 'characterSelect',
+        role: ev.role,
         roomCode: ev.roomCode,
         localPlayerId: ev.localPlayerId,
         connecting: false,
         error: '',
+        serverLost: false,
       }
 
     case 'connectFailed': {
@@ -171,7 +206,11 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
     }
 
     case 'lobbyUpdated':
-      return { ...prev, slots: copySlots(ev.slots) }
+      return {
+        ...prev,
+        slots: copySlots(ev.slots),
+        trackId: isKnownTrack(ev.trackId) ? ev.trackId : prev.trackId,
+      }
 
     case 'characterChosen': {
       if (!Number.isInteger(ev.characterIdx)) return prev
@@ -185,21 +224,20 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
     }
 
     case 'trackChosen': {
-      let known = false
-      for (const entry of TRACK_MANIFEST) {
-        if (entry.id === ev.trackId) {
-          known = true
-          break
-        }
+      if (!canChooseTrack(prev)) return prev
+      if (!isKnownTrack(ev.trackId)) return prev
+      return {
+        ...prev,
+        trackId: ev.trackId,
+        settings: { ...prev.settings, lastTrackId: ev.trackId },
       }
-      return known ? { ...prev, trackId: ev.trackId } : prev
     }
 
     case 'settingsChanged':
       return { ...prev, settings: ev.settings }
 
     case 'raceStarting':
-      return { ...prev, screen: 'race', results: [], error: '' }
+      return { ...prev, screen: 'race', results: [], error: '', serverLost: false }
 
     case 'raceTick':
       return prev
@@ -207,8 +245,14 @@ export function reduceApp(prev: AppState, ev: AppEvent): AppState {
     case 'raceFinished':
       return { ...prev, screen: 'results', results: ev.results.slice() }
 
+    case 'serverLostDuringRace':
+      return { ...prev, serverLost: true, error: SERVER_LOST_RACE_WARNING }
+
+    case 'serverStartReceived':
+      return { ...prev, screen: 'lobby', results: [], error: '', serverLost: false }
+
     case 'backToLobby':
-      return { ...prev, screen: 'lobby', results: [], error: '' }
+      return { ...prev, screen: 'lobby', results: [], error: '', serverLost: false }
 
     case 'quitToTitle':
       return createAppState(prev.settings)

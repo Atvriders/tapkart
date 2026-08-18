@@ -1,0 +1,296 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # Unlike CI, a release has no reserved fallback: all three variables must be
+  # deliberately configured for the repository before a tag can publish.
+  TAPKART_ORIGIN: ${{ vars.TAPKART_ORIGIN }}
+  TAPKART_ANDROID_PACKAGE: ${{ vars.TAPKART_ANDROID_PACKAGE }}
+  TAPKART_SHA256_FINGERPRINTS: ${{ vars.TAPKART_SHA256_FINGERPRINTS }}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      apk_sha256: ${{ steps.stage-apk.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+
+      - name: reject missing, reserved, or malformed release variables
+        id: release-config
+        run: |
+          node --input-type=module - <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs'
+          import { build } from 'esbuild'
+
+          const bundled = await build({
+            stdin: {
+              contents: "export { parseFingerprintList } from '@tapkart/invite'",
+              resolveDir: process.cwd(),
+              loader: 'ts',
+            },
+            bundle: true,
+            format: 'esm',
+            platform: 'node',
+            write: false,
+          })
+          const source = bundled.outputFiles[0].text
+          const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+          const { parseFingerprintList } = await import(moduleUrl)
+
+          const origin = (process.env.TAPKART_ORIGIN ?? '').trim()
+          const packageName = (process.env.TAPKART_ANDROID_PACKAGE ?? '').trim()
+          const rawFingerprints = (process.env.TAPKART_SHA256_FINGERPRINTS ?? '').trim()
+          if (origin === '') throw new Error('TAPKART_ORIGIN repository variable is required')
+          if (packageName === '') throw new Error('TAPKART_ANDROID_PACKAGE repository variable is required')
+          if (rawFingerprints === '') throw new Error('TAPKART_SHA256_FINGERPRINTS repository variable is required')
+
+          const parsedOrigin = new URL(origin)
+          if (
+            parsedOrigin.protocol !== 'https:' ||
+            parsedOrigin.origin !== origin ||
+            parsedOrigin.username !== '' ||
+            parsedOrigin.password !== ''
+          ) {
+            throw new Error('TAPKART_ORIGIN must be one exact credential-free https origin')
+          }
+          const host = parsedOrigin.hostname.toLowerCase()
+          if (host === 'tapkart.example' || host.endsWith('.example') || host === 'example.com' || host.endsWith('.example.com')) {
+            throw new Error('TAPKART_ORIGIN still uses a reserved example host')
+          }
+          const properties = readFileSync('apps/android/gradle.properties', 'utf8')
+          const applicationIdRows = [
+            ...properties.matchAll(/^\s*tapkartApplicationId\s*=\s*(.*?)\s*$/gm),
+          ]
+          if (applicationIdRows.length !== 1 || applicationIdRows[0][1] === '') {
+            throw new Error('gradle.properties must declare tapkartApplicationId exactly once')
+          }
+          const applicationId = applicationIdRows[0][1]
+          if (packageName !== applicationId) {
+            throw new Error(
+              `TAPKART_ANDROID_PACKAGE '${packageName}' does not equal tapkartApplicationId '${applicationId}'`,
+            )
+          }
+
+          const fingerprints = parseFingerprintList(rawFingerprints)
+          if (fingerprints.length === 0) throw new Error('the parsed fingerprint list is empty')
+          if (new Set(fingerprints).size !== fingerprints.length) {
+            throw new Error('TAPKART_SHA256_FINGERPRINTS contains a duplicate entry')
+          }
+          const placeholder = 'DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF:DE:AD:BE:EF'
+          if (fingerprints.includes(placeholder)) {
+            throw new Error('TAPKART_SHA256_FINGERPRINTS still contains the reserved placeholder')
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `first_fingerprint=${fingerprints[0].replaceAll(':', '').toLowerCase()}\n`)
+          console.log(`validated ${fingerprints.length} release certificate fingerprint(s)`)
+          NODE
+
+      - name: build the web payload with the release origin
+        run: VITE_TAPKART_ORIGIN="$TAPKART_ORIGIN" npm run build -w @tapkart/web
+      - name: sync the built payload into the native project
+        run: npm run sync -w @tapkart/android
+      - name: both shipped copies contain the release origin
+        run: |
+          set -euo pipefail
+          for tree in apps/web/dist apps/android/app/src/main/assets/public; do
+            test -d "$tree" || { echo "$tree does not exist"; exit 1; }
+            grep -R -F -l -- "$TAPKART_ORIGIN" "$tree" >/dev/null || {
+              echo "$tree does not contain TAPKART_ORIGIN"
+              exit 1
+            }
+          done
+      - name: the committed invite constants are freshly generated
+        run: |
+          node apps/android/scripts/write-invite-constants.mjs
+          git diff --exit-code -- apps/android/gradle/invite-constants.properties
+
+      - name: decode the signing key only into runner temporary storage
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!name:-}" || { echo "$name secret is required for a release"; exit 1; }
+          done
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tapkart-release.jks"
+          test -s "$RUNNER_TEMP/tapkart-release.jks" || { echo 'decoded keystore is empty'; exit 1; }
+
+      - name: build the signed release APK
+        env:
+          TAPKART_KEYSTORE_PATH: ${{ runner.temp }}/tapkart-release.jks
+          TAPKART_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAPKART_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAPKART_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: apps/android/gradlew -p apps/android :app:assembleRelease
+
+      - name: validate the release manifest, not a stale debug manifest
+        run: node apps/android/scripts/assert-manifest.mjs release
+
+      - name: the certificate matches the first entry of the fully parsed list
+        env:
+          EXPECTED_COMPACT: ${{ steps.release-config.outputs.first_fingerprint }}
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find apps/android/app/build/outputs/apk/release -type f -name '*.apk' -print)
+          test "${#apks[@]}" -eq 1 || { printf 'expected one release APK, found %s\n' "${#apks[@]}"; exit 1; }
+          apk="${apks[0]}"
+          case "$apk" in *unsigned*) echo 'the release APK is unsigned'; exit 1 ;; esac
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          test -x "$apksigner" || { echo 'apksigner was not found'; exit 1; }
+          "$apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          actual="$(sed -n 's/.*SHA-256 digest: *\([0-9a-fA-F]*\).*/\1/p' "$RUNNER_TEMP/certs.txt" | head -1 | tr 'A-F' 'a-f')"
+          test -n "$actual" || { echo 'apksigner printed no SHA-256 digest'; exit 1; }
+          test "$actual" = "$EXPECTED_COMPACT" || {
+            echo "the APK certificate does not match TAPKART_SHA256_FINGERPRINTS[0]"
+            exit 1
+          }
+
+      - name: the APK applicationId matches the configured package
+        run: |
+          set -euo pipefail
+          apk="$(find apps/android/app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
+          test -n "$apk" || { echo 'no release APK was produced'; exit 1; }
+          aapt2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 -print | sort -V | tail -1)"
+          test -x "$aapt2" || { echo 'aapt2 was not found'; exit 1; }
+          actual="$("$aapt2" dump packagename "$apk" | tr -d '\r\n')"
+          test "$actual" = "$TAPKART_ANDROID_PACKAGE" || {
+            echo "APK applicationId '$actual' does not equal '$TAPKART_ANDROID_PACKAGE'"
+            exit 1
+          }
+
+      - name: stage the validated APK
+        id: stage-apk
+        run: |
+          set -euo pipefail
+          apk="$(find apps/android/app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
+          mkdir -p "$RUNNER_TEMP/release-apk"
+          install -m 0644 "$apk" "$RUNNER_TEMP/release-apk/app-release.apk"
+          sha256="$(sha256sum "$RUNNER_TEMP/release-apk/app-release.apk" | cut -d' ' -f1)"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-apk
+          path: ${{ runner.temp }}/release-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 1
+      - name: remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tapkart-release.jks"
+
+  image:
+    # Never move `latest` until a correctly signed, self-consistent APK exists.
+    needs: apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build-image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/atvriders/tapkart:latest
+            ghcr.io/atvriders/tapkart:${{ github.ref_name }}
+            ghcr.io/atvriders/tapkart:sha-${{ github.sha }}
+      - name: every release tag resolves to the same two-platform manifest
+        env:
+          EXPECTED_DIGEST: ${{ steps.build-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for tag in latest "$GITHUB_REF_NAME" "sha-${GITHUB_SHA}"; do
+            docker buildx imagetools inspect "ghcr.io/atvriders/tapkart:$tag" | tee "/tmp/$tag.inspect"
+            grep -F -q "$EXPECTED_DIGEST" "/tmp/$tag.inspect" || { echo "$tag: manifest digest differs"; exit 1; }
+            grep -q 'linux/amd64' "/tmp/$tag.inspect" || { echo "$tag: amd64 missing"; exit 1; }
+            grep -q 'linux/arm64' "/tmp/$tag.inspect" || { echo "$tag: arm64 missing"; exit 1; }
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-release-apk
+          path: ${{ runner.temp }}/release
+      - name: write an immutable release manifest and verify the transferred APK
+        env:
+          APK_SHA256: ${{ needs.apk.outputs.apk_sha256 }}
+          IMAGE_DIGEST: ${{ steps.build-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum "$RUNNER_TEMP/release/app-release.apk" | cut -d' ' -f1)"
+          test "$actual" = "$APK_SHA256" || { echo 'downloaded APK digest changed between jobs'; exit 1; }
+          node --input-type=module - <<'NODE'
+          import { writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+
+          const fingerprints = process.env.TAPKART_SHA256_FINGERPRINTS
+            .split(/[\s,]+/)
+            .map((entry) => entry.trim().toUpperCase())
+            .filter(Boolean)
+          const image = 'ghcr.io/atvriders/tapkart'
+          const manifest = {
+            schemaVersion: 1,
+            tag: process.env.GITHUB_REF_NAME,
+            commitSha: process.env.GITHUB_SHA,
+            container: {
+              image,
+              manifestDigest: process.env.IMAGE_DIGEST,
+              tags: ['latest', process.env.GITHUB_REF_NAME, `sha-${process.env.GITHUB_SHA}`],
+            },
+            android: {
+              artifact: 'app-release.apk',
+              sha256: process.env.APK_SHA256,
+              applicationId: process.env.TAPKART_ANDROID_PACKAGE,
+              origin: process.env.TAPKART_ORIGIN,
+              sha256CertFingerprints: fingerprints,
+            },
+          }
+          writeFileSync(
+            join(process.env.RUNNER_TEMP, 'release', 'release-manifest.json'),
+            `${JSON.stringify(manifest, null, 2)}\n`,
+          )
+          NODE
+
+      - name: create the GitHub Release before uploading its assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "TapKart $GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/release/app-release.apk" \
+            "$RUNNER_TEMP/release/release-manifest.json" \
+            --clobber

@@ -5,6 +5,28 @@ import { makeLoopbackPair } from '../src/loopback'
 const DEFAULTS: LoopbackOptions = { latencyMs: 150, jitterMs: 50, lossRate: 0.05, seed: 0xc0ffee }
 
 describe('makeLoopbackPair', () => {
+  it('drops both queued directions on close and notifies the far peer exactly once', () => {
+    const { a, b, pump } = makeLoopbackPair({ ...DEFAULTS, jitterMs: 0, lossRate: 0 })
+    const atA: number[] = []
+    const atB: number[] = []
+    const lostAtB: string[] = []
+    a.onMessage((_peerId, _channel, data) => atA.push(data[0]))
+    b.onMessage((_peerId, _channel, data) => atB.push(data[0]))
+    b.onPeerLost((peerId) => lostAtB.push(peerId))
+
+    a.broadcast('reliable', new Uint8Array([1]))
+    b.broadcast('reliable', new Uint8Array([2]))
+    a.close()
+    a.close()
+    b.broadcast('reliable', new Uint8Array([3]))
+    pump(1000)
+
+    expect(atA).toEqual([])
+    expect(atB).toEqual([])
+    expect(lostAtB).toEqual(['a'])
+    expect(b.peers()).toEqual([])
+  })
+
   it('delivers a message after latencyMs and not before', () => {
     const { a, b, pump } = makeLoopbackPair({ ...DEFAULTS, jitterMs: 0, lossRate: 0 })
     let delivered = false

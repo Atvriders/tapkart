@@ -1,4 +1,5 @@
 import { CHARACTERS, TRACK_MANIFEST } from '@tapkart/content'
+import { NAME_MAX_BYTES, utf8Truncate } from '@tapkart/protocol'
 import type { ControlScheme } from './controls/types'
 import type { TiltCalibration } from './controls/tilt'
 import { IDENTITY_TILT_CALIBRATION } from './controls/tilt'
@@ -52,7 +53,19 @@ export function memoryStore(): KeyValueStore {
   }
 }
 
-const PLAYER_NAME_MAX = 12
+export const PLAYER_NAME_MAX = 12
+
+/** Trims the persisted/displayed name and enforces both the settings character
+ * cap and the multiplayer wire cap. `''` is a valid unset value; `null` means
+ * the UI must retain the previous value and explain why. */
+export function normalizePlayerName(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return ''
+  if (trimmed.length > PLAYER_NAME_MAX) return null
+  const onWire = utf8Truncate(trimmed, NAME_MAX_BYTES)
+  const complete = utf8Truncate(trimmed, trimmed.length * 4)
+  return onWire.length === complete.length ? trimmed : null
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -118,8 +131,8 @@ export function loadSettings(store: KeyValueStore): Settings {
 
   const name = parsed.playerName
   if (typeof name === 'string') {
-    const trimmed = name.trim()
-    if (trimmed.length >= 1 && trimmed.length <= PLAYER_NAME_MAX) out.playerName = trimmed
+    const normalized = normalizePlayerName(name)
+    if (normalized !== null) out.playerName = normalized
   }
 
   return out
@@ -139,7 +152,7 @@ export function saveSettings(store: KeyValueStore, s: Settings): void {
     audioVolume: s.audioVolume,
     characterIdx: s.characterIdx,
     lastTrackId: s.lastTrackId,
-    playerName: s.playerName,
+    playerName: normalizePlayerName(s.playerName) ?? '',
   }
   store.set(SETTINGS_STORAGE_KEY, JSON.stringify(payload))
 }

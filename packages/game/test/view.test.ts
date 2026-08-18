@@ -123,6 +123,8 @@ function makeFakeGuest(opts: FakeOpts): RaceSession {
       return ids.length
     },
     corrections: () => 0,
+    onHardResync: () => undefined,
+    hardResyncs: () => 0,
     correctionDelta:
       opts.correctionDelta ??
       ((outPos: Vec3) => {

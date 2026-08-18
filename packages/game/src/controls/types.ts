@@ -34,6 +34,16 @@ export interface ControlInputs {
   viewport: Viewport
 }
 
+/** Boundary between browser input events and the deterministic control layer.
+ * `snapshotTilt` copies the newest complete sensor reading into caller-owned
+ * storage; calibration can therefore take one atomic sample without retaining
+ * a mutable event object. */
+export interface InputSource {
+  drain(out: ControlInputs): void
+  snapshotTilt(out: TiltSample): boolean
+  detach(): void
+}
+
 /**
  * Allocates one ControlInputs with every pointer slot a DISTINCT object. Called
  * once, at startup: the drain path (§5.6) and every adapter reuse it forever, so

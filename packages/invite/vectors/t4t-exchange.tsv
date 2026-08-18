@@ -1,0 +1,55 @@
+# t4t-exchange.tsv — version 1
+# NAME <TAB> NDEF_URI <TAB> RESET_BEFORE <TAB> COMMAND_HEX <TAB> RESPONSE_HEX <TAB> SELECTED_AFTER
+# NDEF_URI: '.' leaves the tag as it is, '-' is setNdefUri(null), anything else is setNdefUri(uri).
+# Applied IN FILE ORDER against one TagState. RESET_BEFORE=1 starts a new conversation.
+#
+# --- the golden exchange (§5.7), including the two-step CC read a real Android reader performs
+selectApp	https://tapkart.example/r/ABCDE	1	00A4040007D276000085010100	9000	app
+selectCc	.	0	00A4000C02E103	9000	cc
+readCcLen	.	0	00B0000002	000F9000	cc
+readCcBody	.	0	00B000020D	2000F600FF0406E104040000FF9000	cc
+selectNdefFile	.	0	00A4000C02E104	9000	ndef
+readNlen	.	0	00B0000002	001C9000	ndef
+readNdefMessage	.	0	00B000021C	D1011855047461706B6172742E6578616D706C652F722F41424344459000	ndef
+#
+# --- the one-shot 15-byte CC read, and the 12-byte spelling of SELECT app
+selectCcAgain	.	0	00A4000C02E103	9000	cc
+readCcOneShot	.	0	00B000000F	000F2000F600FF0406E104040000FF9000	cc
+selectAppTwelveByte	.	1	00A4040007D2760000850101	9000	app
+#
+# --- the non-advertising host (§5.6): a well-formed EMPTY tag, never a refusal
+emptySelectApp	-	1	00A4040007D276000085010100	9000	app
+emptySelectNdefFile	.	0	00A4000C02E104	9000	ndef
+emptyReadNlen	.	0	00B0000002	00009000	ndef
+readNlenEmpty	-	1	00B0000002	6986	none
+#
+# --- the error table (§5.5), every row
+wrongAid	https://tapkart.example/r/ABCDE	1	00A4040007A0000002471001	6A82	none
+selectByNameWrongP1P2	.	1	00A4040107D2760000850101	6A86	none
+selectAppForUnknownFile	.	1	00A4040007D276000085010100	9000	app
+unknownFileId	.	0	00A4000C02E105	6A82	app
+selectCcAfterReset	.	1	00A4000C02E103	6985	none
+readBinaryAfterReset	.	1	00B0000002	6986	none
+selectAppBeforeRead	.	1	00A4040007D276000085010100	9000	app
+readBinaryWhileApp	.	0	00B0000002	6986	app
+badCla	.	0	80B0000002	6E00	app
+badIns	.	0	00C0000000	6D00	app
+shortApdu	.	0	00A4	6700	app
+extendedLength	.	0	00A40400000007D2760000850101	6700	app
+#
+# --- the 30-byte file: case 1 READ BINARY, offset past the end, and truncation
+selectAppForFileCases	.	1	00A4040007D276000085010100	9000	app
+selectNdefForFileCases	.	0	00A4000C02E104	9000	ndef
+readBinaryCase1	.	0	00B00000	6700	ndef
+readPastEnd	.	0	00B0FFFF02	6B00	ndef
+readOverRunTruncated	.	0	00B0001C40	44459000	ndef
+#
+# --- the second tap of the evening: resetTag, then the whole exchange again
+replayReadBeforeSelect	.	1	00B0000002	6986	none
+replaySelectApp	.	1	00A4040007D276000085010100	9000	app
+replaySelectCc	.	0	00A4000C02E103	9000	cc
+replayReadCcLen	.	0	00B0000002	000F9000	cc
+replayReadCcBody	.	0	00B000020D	2000F600FF0406E104040000FF9000	cc
+replaySelectNdefFile	.	0	00A4000C02E104	9000	ndef
+replayReadNlen	.	0	00B0000002	001C9000	ndef
+replayReadNdefMessage	.	0	00B000021C	D1011855047461706B6172742E6578616D706C652F722F41424344459000	ndef

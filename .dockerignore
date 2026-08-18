@@ -1,0 +1,41 @@
+.git
+.codex
+.github
+**/node_modules
+**/.npm
+**/.cache
+**/.vite
+**/coverage
+playwright-report
+test-results
+*.log
+
+# Local environment and signing material must never enter the build context.
+**/.env
+**/.env.*
+**/local.properties
+**/keystore.properties
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pem
+**/*.key
+
+# Generated web, server, and Android output is rebuilt inside the image.
+apps/web/dist
+apps/web/public/icons
+packages/server/dist
+apps/android/build
+apps/android/app/build
+apps/android/.gradle
+apps/android/.kotlin
+apps/android/app/src/main/assets/public
+
+# Development-only material is not part of the runtime artifact.
+docs
+e2e
+content/plan1-task-reports
+content/plan1-sdd-ledger.md
+content/final-fix-wave-report.md
+content/pipeline/records-out
+content/pipeline/*.results.jsonl

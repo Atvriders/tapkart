@@ -1,6 +1,26 @@
 import type { EntityKind, Intent, ItemKind, RacePhase, Surface, Vec3 } from '@tapkart/sim'
 
-export const PROTOCOL_VERSION = 1
+/**
+ * TWO, not one, and the bump is not optional.
+ *
+ * ROOM_CODE_LENGTH went 4 -> 5 (F-P4-34), which moves every field after
+ * `hello`'s room code by five bits. That is a BREAKING wire change: a v1 peer
+ * and a v2 peer decode different messages out of the same bytes, and both of
+ * them find something plausible there. F-P4-11's "adding tags is additive" is
+ * true of `clientUpdate` and `resyncRequest` and false of the room code, and
+ * the two land in the same release.
+ *
+ * `decodeHeader` below throws on a mismatch and @tapkart/net's shipped guard
+ * turns that into a counted, dropped datagram - which is right everywhere
+ * except for `hello`, where a silent drop is a player watching a spinner
+ * forever. The server therefore reads `data[1]` DIRECTLY, before the guard
+ * (contract §3.0), and closes the socket with WS_CLOSE_VERSION_MISMATCH = 4001.
+ * A close code crosses a version boundary; an encoded `welcome` does not.
+ *
+ * The byte's offset is what makes that legal: index 1, in a fixed-format 2-byte
+ * header, for every kind and every version this protocol will ever have.
+ */
+export const PROTOCOL_VERSION = 2
 
 export type ChannelName = 'unreliable' | 'reliable'
 

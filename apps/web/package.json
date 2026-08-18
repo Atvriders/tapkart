@@ -4,15 +4,19 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@capacitor/core": "^8.5.0",
     "@tapkart/game": "*",
+    "@tapkart/invite": "*",
     "@tapkart/render": "*"
   },
   "devDependencies": {
+    "@tapkart/server": "*",
     "vite": "^7.0.0"
   },
   "scripts": {
+    "predev": "node tools/png.mjs",
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "build": "node tools/png.mjs && vite build && node tools/build-sw.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.sw.json"
   }
 }

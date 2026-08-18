@@ -1,0 +1,152 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Forks and unconfigured branches remain harmless. Release tags reject this
+  # reserved value in release.yml rather than publishing with it.
+  TAPKART_ORIGIN: ${{ vars.TAPKART_ORIGIN || 'https://tapkart.example' }}
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: build the production PWA with the configured public origin
+        run: VITE_TAPKART_ORIGIN="$TAPKART_ORIGIN" npm run build -w @tapkart/web
+      - name: the public origin is embedded in the browser bundle
+        run: |
+          set -euo pipefail
+          grep -R -F -l -- "$TAPKART_ORIGIN" apps/web/dist >/dev/null || {
+            echo "the web build does not contain TAPKART_ORIGIN"
+            exit 1
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 1
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: build the web payload with the same origin as the manifest
+        run: VITE_TAPKART_ORIGIN="$TAPKART_ORIGIN" npm run build -w @tapkart/web
+      - name: generate the ignored native web payload in a clean checkout
+        run: npm run sync -w @tapkart/android
+      - name: both the web build and Capacitor copy contain the configured origin
+        run: |
+          set -euo pipefail
+          for tree in apps/web/dist apps/android/app/src/main/assets/public; do
+            test -d "$tree" || { echo "$tree does not exist"; exit 1; }
+            grep -R -F -l -- "$TAPKART_ORIGIN" "$tree" >/dev/null || {
+              echo "$tree does not contain TAPKART_ORIGIN"
+              exit 1
+            }
+          done
+      - name: the committed invite constants are freshly generated
+        run: |
+          node apps/android/scripts/write-invite-constants.mjs
+          git diff --exit-code -- apps/android/gradle/invite-constants.properties
+      - run: apps/android/gradlew -p apps/android :app:testDebugUnitTest
+      - run: apps/android/gradlew -p apps/android :app:assembleDebug
+      - run: node apps/android/scripts/assert-manifest.mjs debug
+      - run: bash apps/android/scripts/assert-pins.sh
+      - run: bash apps/android/scripts/assert-signing.sh
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # playwright.config.ts builds web once, builds server once, then starts it.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: docker/setup-buildx-action@v3
+      - name: build the image for this runner architecture
+        run: docker build -t tapkart:ci .
+      - run: bash docker/assert-container.sh tapkart:ci
+
+  edge-image:
+    # `latest` is release-only. Master publishes `edge` and an immutable full
+    # commit-SHA tag, after every gating job above has passed.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [web, android, e2e, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/atvriders/tapkart:edge
+            ghcr.io/atvriders/tapkart:sha-${{ github.sha }}
+      - name: edge and its immutable SHA tag are multi-platform
+        run: |
+          set -euo pipefail
+          for tag in edge "sha-${GITHUB_SHA}"; do
+            docker buildx imagetools inspect "ghcr.io/atvriders/tapkart:$tag" | tee "/tmp/$tag.inspect"
+            grep -q 'linux/amd64' "/tmp/$tag.inspect" || { echo "$tag: amd64 missing"; exit 1; }
+            grep -q 'linux/arm64' "/tmp/$tag.inspect" || { echo "$tag: arm64 missing"; exit 1; }
+          done

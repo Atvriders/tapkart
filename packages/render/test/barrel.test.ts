@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import * as render from '../src/index'
 import * as audio from '../src/audio'
+import * as audioGraph from '../src/audio/graph'
 import * as backend from '../src/backend'
 import * as camera from '../src/camera'
 import * as descriptors from '../src/descriptors'
@@ -19,15 +20,18 @@ const PKG = resolve(HERE, '..')
 const SRC = join(PKG, 'src')
 const REPO = resolve(PKG, '..', '..')
 
-/** §4.11, in order. `three/renderer` is deliberately absent. */
-const BARREL_MODULES = [
+/** Plan 3 §4.11's top-level modules. Adapter directories stay absent. */
+const TOP_LEVEL_MODULES = [
   'types', 'mesh', 'descriptors', 'camera', 'frame', 'hud', 'audio', 'smoothing', 'backend',
 ] as const
 
+/** Plan 5 §9 adds the nested pure graph; neither adapter enters the barrel. */
+const BARREL_MODULES = [...TOP_LEVEL_MODULES, 'audio/graph'] as const
+
 const NAMESPACES: [string, object][] = [
   ['types', types], ['mesh', mesh], ['descriptors', descriptors], ['camera', camera],
-  ['frame', frame], ['hud', hud], ['audio', audio], ['smoothing', smoothing],
-  ['backend', backend],
+  ['frame', frame], ['hud', hud], ['audio', audio], ['audio/graph', audioGraph],
+  ['smoothing', smoothing], ['backend', backend],
 ]
 
 /**
@@ -76,7 +80,7 @@ function moduleGraph(entry: string): string[] {
 }
 
 describe('@tapkart/render barrel', () => {
-  it('re-exports exactly the nine modules §4.11 names, each once', () => {
+  it('re-exports the nine Plan 3 modules and Plan 5 audio graph, each once', () => {
     const text = readFileSync(join(SRC, 'index.ts'), 'utf8')
     for (const name of BARREL_MODULES) {
       const line = `export * from './${name}'`
@@ -93,7 +97,7 @@ describe('@tapkart/render barrel', () => {
       .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
       .map((f) => f.slice(0, -3))
       .sort()
-    expect(onDisk).toEqual([...BARREL_MODULES].sort())
+    expect(onDisk).toEqual([...TOP_LEVEL_MODULES].sort())
 
     // The adapter lives in its own directory precisely so it is never one of the
     // files the rule above sweeps up.
@@ -101,13 +105,15 @@ describe('@tapkart/render barrel', () => {
     expect(existsSync(join(SRC, 'three', 'renderer.ts'))).toBe(true)
   })
 
-  it('does not re-export the Three.js adapter', () => {
+  it('does not re-export either browser adapter', () => {
     expect(Object.prototype.hasOwnProperty.call(render, 'createThreeRenderer')).toBe(false)
     expect(Object.prototype.hasOwnProperty.call(render, 'DEFAULT_THREE_OPTIONS')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(render, 'createWebAudioBackend')).toBe(false)
     // Statements, not prose: the barrel's comment explains why `three` is absent,
     // so a bare substring check would fail on its own documentation.
     const text = readFileSync(join(SRC, 'index.ts'), 'utf8')
     expect(text).not.toMatch(/export \* from '\.\/three/)
+    expect(text).not.toMatch(/export \* from '\.\/audio\/web'/)
     expect(THREE_SPECIFIER.test(text)).toBe(false)
   })
 
@@ -122,6 +128,7 @@ describe('@tapkart/render barrel', () => {
     for (const file of graph) {
       const rel = relative(PKG, file)
       expect(relative(SRC, file).startsWith('three'), `${rel} is the adapter`).toBe(false)
+      expect(relative(SRC, file), `${rel} is the audio adapter`).not.toBe('audio/web.ts')
       expect(THREE_SPECIFIER.test(readFileSync(file, 'utf8')), `${rel} imports three`).toBe(false)
     }
   })
@@ -244,6 +251,8 @@ describe('packages/render/package.json', () => {
     expect(pkg.name).toBe('@tapkart/render')
     expect(pkg.exports['.']).toBe('./src/index.ts')
     expect(pkg.exports['./three']).toBe('./src/three/renderer.ts')
+    expect(pkg.exports['./web-audio']).toBe('./src/audio/web.ts')
+    expect(Object.prototype.hasOwnProperty.call(render, 'createWebAudioBackend')).toBe(false)
   })
 
   it('declares the type declarations three does not ship', () => {

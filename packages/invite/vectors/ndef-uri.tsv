@@ -1,0 +1,6 @@
+# ndef-uri.tsv — version 1
+# URI <TAB> NDEF_FILE_HEX
+# '-' in the URI column is the empty file: a non-advertising host serves 00 00.
+https://tapkart.example/r/ABCDE	001CD1011855047461706B6172742E6578616D706C652F722F4142434445
+https://kart.example.com/r/ABCDE	001DD1011955046B6172742E6578616D706C652E636F6D2F722F4142434445
+-	0000

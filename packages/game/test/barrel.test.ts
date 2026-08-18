@@ -8,6 +8,8 @@ import * as controls from '../src/controls/index'
 import * as controlTypes from '../src/controls/types'
 import * as tilt from '../src/controls/tilt'
 import * as localinput from '../src/localinput'
+import * as multiplayer from '../src/multiplayer'
+import * as multiplayerSession from '../src/multiplayer-session'
 import * as results from '../src/results'
 import * as session from '../src/session'
 import * as settings from '../src/settings'
@@ -25,6 +27,8 @@ const MODULES: Array<[string, Record<string, unknown>]> = [
   ['results', results],
   ['session', session],
   ['localinput', localinput],
+  ['multiplayer', multiplayer],
+  ['multiplayer-session', multiplayerSession],
   ['view', view],
 ]
 

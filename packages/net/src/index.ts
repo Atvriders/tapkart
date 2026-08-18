@@ -11,8 +11,9 @@
 // than accumulated: adding or removing a name here now shows up as a diff in
 // that test, at review time, instead of in a downstream package months later.
 //
-// The nine modules, in the order the locked contract's module map lists them
-// plus the three later additions:
+// The original simulation modules retain their established order; Plan 4's
+// pure protocol, transport and lobby modules follow. The two browser adapters
+// are package subpaths only and are deliberately absent here:
 //   - clock   [15c] TICK_MS (moved here from client.ts - same binding, same
 //             barrel surface), advanceAccumulator and MAX_CATCHUP_TICKS, which
 //             Plan 3's game clock and Plan 4's server ticker both reach for and
@@ -35,6 +36,7 @@
 // every fixture module by name.
 export * from './clock'
 export * from './transport'
+export * from './socket'
 export * from './loopback'
 export * from './apply'
 export * from './authority'
@@ -42,3 +44,11 @@ export * from './client'
 export * from './shadow'
 export * from './local'
 export * from './receive'
+export * from './wsframe'
+export * from './websocket'
+export * from './signal'
+export * from './webrtc'
+export * from './liveness'
+export * from './fanout'
+export * from './authz'
+export * from './roomclient'

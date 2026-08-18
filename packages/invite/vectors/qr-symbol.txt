@@ -1,0 +1,202 @@
+# qr-symbol.txt — version 1
+#
+# Reference symbols for packages/invite/src/qr.ts. Contract §5.9 layer 2.
+#
+# F-P5-2: "Test against published reference vectors, never against the encoder's
+# own output." NEVER regenerate this file with buildQrMatrix: the moment you do,
+# every test below becomes a tautology and the one defect that matters — a
+# beautiful square no camera can read — becomes invisible to CI.
+#
+# Format, line-oriented like the other vector files (§5.8):
+#   SYMBOL <name> <version> <mask> <compare> <text>
+#   <4*version+17 lines of grid, '#' dark and '.' light>
+#   END
+# compare = full     : buildQrMatrix(text) must equal the grid module for module
+# compare = function : text is '-'; the grid's function-pattern and format
+#                      modules must equal those of every 'full' symbol with the
+#                      same version and mask (and there must be at least one)
+#
+# --- Provenance, per symbol -------------------------------------------------
+#
+# annexI  ISO/IEC 18004 Annex I, "Symbol encoding example": the version 1-M
+#         symbol encoding 01234567, mask 2. Its mode is NUMERIC, so this
+#         byte-mode encoder cannot reproduce its data region — but the finder
+#         patterns, separators, timing patterns, dark module and BOTH copies of
+#         the format information depend only on (version, ECC level, mask), and
+#         those are what this symbol pins. Grid transcribed from the ASCII
+#         matrix in kennytm/qrcode-rust's `test_annex_i_qr`
+#         (github.com/kennytm/qrcode-rust, src/lib.rs) — an independent
+#         implementation's transcription of that figure. Both copies of its
+#         format information read 101111001111100, which is the string
+#         ISO/IEC 18004 prints for ECC level M, mask 2, and which
+#         formatInfoBits(2) computes.
+#
+# pagedout  Byte mode, ECC-M, version 1. Its sixteen DATA CODEWORDS are
+#         published in A. Leiradella, "QR Codes on the ZX81" (2020-08-02),
+#         leiradel.github.io/2020/08/02/QR-Codes-on-the-ZX81.html, as
+#         40 95 06 22 76 56 44 F7 57 42 10 EC 11 EC 11 EC — and the same
+#         article publishes the ten-EC generator polynomial that
+#         vectors/qr-reference.tsv also carries. The article fixes mask 0 for
+#         the ZX81's sake; this symbol carries mask 2, the mask the published
+#         penalty rules select, so the grid below is NOT copied from that
+#         article's figures. It was produced by node-qrcode 1.5.4
+#         (github.com/soldair/node-qrcode), an independent implementation, as
+#         QRCode.create([{data:'PagedOut!',mode:'byte'}],{errorCorrectionLevel:'M'})
+#         and decoded back to "PagedOut!" by jsQR 1.4.0, a port of ZXing's
+#         decoder. Neither library is a dependency of this repository; both were
+#         run once, during authoring, to produce and check this file.
+#
+# invite  The exact string the lobby displays for the placeholder deployment
+#         (§1): https://tapkart.example/r/ABCDE — byte mode, ECC-M, version 3,
+#         and the published penalty rules select mask 6. Same provenance as
+#         pagedout: the grid was produced by node-qrcode 1.5.4 and decoded back
+#         to the same string by jsQR 1.4.0. It is here because a symbol at a
+#         second version, with a second character-count width and a real
+#         payload, is the one the product actually shows.
+#
+# longest The LONGEST invite URI this game can build: an origin of exactly
+#         MAX_INVITE_ORIGIN_BYTES bytes, LOBBY_PATH_PREFIX and a five-character
+#         room code — 208 bytes, which lands on version 10, the cap. It is here
+#         because versions 1 and 3 exercise neither of the two things that only
+#         appear higher up: the VERSION INFORMATION blocks (version 7 and above)
+#         and the 16-bit character count indicator (version 10). Version 10 is
+#         also the only one of these four with two block groups. Same
+#         provenance: node-qrcode 1.5.4 produced the grid and jsQR 1.4.0 read it
+#         back.
+#
+SYMBOL annexI 1 2 function -
+#######..#.##.#######
+#.....#..####.#.....#
+#.###.#.#.....#.###.#
+#.###.#.##....#.###.#
+#.###.#.#.###.#.###.#
+#.....#.#...#.#.....#
+#######.#.#.#.#######
+........#..##........
+#.#####..#..#.#####..
+...#.#.##.#.#..#.##..
+..#...##.#.#.#..#####
+....#....#.....####..
+...######..#.#..#....
+........#.#####..##..
+#######..##.#.##.....
+#.....#.#.#####...#.#
+#.###.#.#...#..#.##..
+#.###.#.##..#..#.....
+#.###.#.#.##.#..#.#..
+#.....#........##.##.
+#######.####.#..#.#..
+END
+SYMBOL pagedout 1 2 full PagedOut!
+#######..##...#######
+#.....#...#...#.....#
+#.###.#.#.#.#.#.###.#
+#.###.#.#####.#.###.#
+#.###.#.##..#.#.###.#
+#.....#.#..#..#.....#
+#######.#.#.#.#######
+........#.#..........
+#.#####....#..#####..
+..#....#.#####..#.#.#
+.######.#.#.#....###.
+...###.######....##..
+#..####.#...#.#......
+........#.#.#...####.
+#######..#.#.#...#.#.
+#.....#.###.....####.
+#.###.#.#.##....#...#
+#.###.#.#.######.##..
+#.###.#.#...#.#..##..
+#.....#..#.#####.##..
+#######.#...#......#.
+END
+SYMBOL invite 3 6 full https://tapkart.example/r/ABCDE
+#######.#..#.###.##...#######
+#.....#.#....###...##.#.....#
+#.###.#.#.#####....##.#.###.#
+#.###.#..##...##.####.#.###.#
+#.###.#.##...#.#..##..#.###.#
+#.....#..#.#.##.......#.....#
+#######.#.#.#.#.#.#.#.#######
+.........####.#....##........
+#..######...######.###..#.###
+..###.........#....#...##.##.
+#...###.#..#..#...#..#....#..
+#.#....#.#..#.##.##.####.#..#
+.#.##.##.###.##...#.#.##....#
+###.##.##.#......##..########
+.#.##.##.##...##.#.####.#.#.#
+..####.#.....##.#...#...#.#.#
+..#.####..#....#.#..#....#...
+#.###..#.##.#....#####..#.##.
+##.#..##.#.####.#####.#.##..#
+####...#####.#.##..##...###..
+#####.##.#.#.#..#...########.
+........##...#..#.###...##...
+#######.####.#.##.###.#.##...
+#.....#.#..#.#...####...#..#.
+#.###.#.#..#.#.###.#######...
+#.###.#.#.....#.#.#.#......#.
+#.###.#..#..#######..#.##.###
+#.....#..#.#.##......#..###.#
+#######.#.#.#.##.#.####.##...
+END
+SYMBOL longest 10 1 full https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/r/ABCDE
+#######.#...#.##.#..##..#.#.#.#.#.#.#.#.#.#.####..#######
+#.....#..###..#..#.....#..#...#...#...#...#..#.#..#.....#
+#.###.#.#.##.###.#.#..######.###.###.###.###.###..#.###.#
+#.###.#.....#.##.#...#..##.#.#...#.#.#.#.#.#.#.#..#.###.#
+#.###.#..#....##..#.##..########..#.#.#.#.#.#..#..#.###.#
+#.....#.######...#..#..#.##...#...#...#...#...#...#.....#
+#######.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#######
+.........#..###.###.##...##...#.#...#...#...#............
+#.#...##.###.####..#####.######.#.#.#.#.#.#.#.##...#..#.#
+.#..#..##.#.#...#.##.#.#...#.#.#.#.#.#.#.#.#.#.#.#.#....#
+..##..#.#...##....##....#.####.###.###.###.###..##.##.#.#
+#####..###..####.##.#.#..#......#...#...#...#.......##.#.
+#####.#.####.##.#..##..###..#.#.#.#.#.#.#.#.#.##..#.##.##
+##...#.##.#.#..##.##...###.###.#.#.#.#.#.#.#.#.#.#.#....#
+..#####.##..#.##..##.###.#####.###.###.###.###..##.##.#.#
+######.###..###.###.##.###..#...#...#...#...#.......##...
+##.#..#.#.##..###..#####.##.#.#.#.#.#.#.#.#.#.##....##.##
+##.###.##.#.#####.#.#.##...#.#.#.#.#.#.#.#.#.#.#...#....#
+...##.#.##..#.#..###.##.#.####.###.###.###.###..#..##.#.#
+##..##..###.###...###.#..#..###.#...#...#...#......###.#.
+##.#.##.##.##.###.##...#.#..#...#.#.#.#.#.#.#.##..#.##.##
+##.#.#..#.#.#####..#####...#.#.#.#.#.#.#.#.#.#.#.#....#.#
+#..#.##.#.#...#..#.#.##.#.########.###.###.###...#.####.#
+.#..##.########..####.#..#..#..##...#...#...#..##...##.#.
+#..#.###.#....####.....#.#..#.#.#.#.#.#.#.#.#.##..#.#..##
+...#.#.#####.####.######...#.#.###.#.#.#.#.#.#.#.#.#....#
+##.######.####.....####.#######..#.###.###.###..#####.#.#
+#...#...####..#..###..#..##...#.#...#...#...#...#...##.#.
+#.###.#.##.#..#.#.#....#.##.#.#.#.#.#.#.#.#.#.###.#.##.##
+###.#...###..##..#.#####.##...##.#.#.#.#.#.#.#..#...#...#
+.########.#....#...###..#.########.###.###.###.######.#.#
+.#.##....#######.###..........#.#...#...#...#..##.#..#.#.
+#.....##.#.#......#..##.####.##.#.#.#.#.#.#.#.##.###.#.##
+##..#..#.##......#.####...##.#.#.#.#.#.#.#.#.#...#.#...#.
+.####.#.#....###...###..#...#.####.###.###.###.##.#.#.#..
+.##.#......##.#..###..#.......#.#...#...#...#..##.#..#...
+#.######.###.#..#.##.#.#.#.####.#.#.#.#.#.#.#.##.###.#.##
+####...#.#....##.#...###..##.#.#.#.#.#.#.#.#.#...#.#....#
+.##..##.#....##.#.#.....####..####.###.###.###.##.#.#.#.#
+.#..#.....###.###.#.###.......#.#...#...#...#..##.#..#.#.
+#.##..##.#...#..#..#.###.###.##.#.#.#.#.#.#.#.##.#.#.#.##
+#####..#.#.##.##.......#..##.#.#.#.#.#.#.#.#.#....##.#..#
+###.###.##...##.#.###...#...#.####.###.###.###.####.###.#
+#...#.......#.###..####.......#.#...#...#...#..#..#..#.#.
+..#####.##.###..#..#####.###.####.#.#.#.#.#.#.##.##....##
+..##.#.#.#....##..##...#..##.#.#.#.#.#.#.#.#.#.###.#....#
+#.#..###.#.####.#.#.#...#...#.####.###.###.###..#.###.#.#
+#####..##.....###..#.##.........#...#...#...#..##.##.#.#.
+......####....#.#..#####.######.#.#.#.#.#.#.#.########.##
+........##...#.##.##...#..#...##.#.#.#.#.#.#.#.##...#...#
+#######.##..###...#.###.#.#.#.####.###.###.###.##.#.#.#.#
+#.....#....##..##..#.#....#...#.#...#...#...#...#...##.#.
+#.###.#..#....#....######.#####.#.#.#.#.#.#.#.########.##
+#.###.#..#...##.#.##..###.#.#..#.#.#.#.#.#.#.#..#...#....
+#.###.#.#.#.#..#..#.#..#.##.#.####.###.###.###..#.#.#.###
+#.....#...####.#...#.#####.#.#..#...#...#...#..#.#.#.#...
+#######.#.#..###....####..####..#.#.#.#.#.#.#.####.###..#
+END

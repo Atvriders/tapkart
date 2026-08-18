@@ -1,0 +1,25 @@
+{
+  "name": "@tapkart/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main.ts"
+  },
+  "dependencies": {
+    "@tapkart/content": "*",
+    "@tapkart/net": "*",
+    "@tapkart/protocol": "*",
+    "@tapkart/sim": "*",
+    "ws": "8.21.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "node scripts/build-server.mjs",
+    "start": "node dist/main.mjs"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  }
+}

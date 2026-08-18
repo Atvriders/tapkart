@@ -1,0 +1,26 @@
+services:
+  tapkart:
+    image: ghcr.io/atvriders/tapkart:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3031}:${PORT:-3031}"
+    environment:
+      # One host-side PORT value selects both the published and bound port.
+      PORT: "${PORT:-3031}"
+
+      # Read by the entrypoint at container start, never by the server. Both
+      # default to empty so a self-hoster without an APK gets a working server
+      # and the repository never ships a valid-looking placeholder statement.
+      # Set both in the host environment when publishing an Android build.
+      TAPKART_ANDROID_PACKAGE: "${TAPKART_ANDROID_PACKAGE:-}"
+      TAPKART_SHA256_FINGERPRINTS: "${TAPKART_SHA256_FINGERPRINTS:-}"
+
+      # Server settings, generated from ENV_SCHEMA. Uncomment to override one.
+      # BEGIN GENERATED DEFAULTS — do not hand-edit
+      # MAX_ROOMS: "64"
+      # MAX_PEERS_PER_ROOM: "8"
+      # ROOM_IDLE_MS: "600000"
+      # JOIN_RATE_WINDOW_MS: "60000"
+      # JOIN_RATE_MAX: "10"
+      # ICE_SERVERS: "stun:stun.l.google.com:19302"
+      # END GENERATED DEFAULTS

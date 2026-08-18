@@ -2,10 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-// §8.2: `controls/source.ts` is one of exactly four files CI never imports. This
-// test never imports it either - it READS it, which is the only way to assert
-// something about a DOM module under `environment: 'node'` without pulling the DOM
-// into the run.
+// §8.2: `controls/source.ts` is the one controls module allowed to own DOM APIs.
+// Most of this suite reads it as text; controls-source.test imports its event-target
+// boundary directly so the calibration snapshot seam has behavioral coverage.
 const SRC = fileURLToPath(new URL('../src/', import.meta.url))
 const CONTROLS = `${SRC}controls/`
 

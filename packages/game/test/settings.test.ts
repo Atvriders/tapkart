@@ -4,9 +4,11 @@ import { IDENTITY_TILT_CALIBRATION } from '../src/controls/tilt'
 import type { Settings } from '../src/settings'
 import {
   DEFAULT_SETTINGS,
+  PLAYER_NAME_MAX,
   SETTINGS_STORAGE_KEY,
   loadSettings,
   memoryStore,
+  normalizePlayerName,
   saveSettings,
 } from '../src/settings'
 import { makeSettingsFixture } from './fixtures/game-fixtures'
@@ -37,6 +39,18 @@ const CUSTOM: Settings = {
   lastTrackId: TRACK_MANIFEST[1].id,
   playerName: 'Rae',
 }
+
+describe('normalizePlayerName', () => {
+  it('trims names, permits unset, and enforces character and UTF-8 wire caps', () => {
+    expect(PLAYER_NAME_MAX).toBe(12)
+    expect(normalizePlayerName('  Rae Vance  ')).toBe('Rae Vance')
+    expect(normalizePlayerName('   ')).toBe('')
+    expect(normalizePlayerName('abcdefghijkl')).toBe('abcdefghijkl')
+    expect(normalizePlayerName('abcdefghijklm')).toBeNull()
+    expect(normalizePlayerName('🏁🏁🏁🏁')).toBe('🏁🏁🏁🏁')
+    expect(normalizePlayerName('🏁🏁🏁🏁🏁')).toBeNull()
+  })
+})
 
 function storeWith(json: string): ReturnType<typeof memoryStore> {
   const store = memoryStore()

@@ -1,0 +1,66 @@
+# qr-reference.tsv — version 1
+# Published QR Code (ISO/IEC 18004) table values, transcribed by hand.
+#
+# F-P5-2 and contract §5.9: packages/invite/src/qr-tables.ts COMPUTES every one
+# of these. This file is the independent published value it is compared against.
+# NEVER regenerate this file from the encoder's own output — a computation
+# compared to itself is not evidence.
+#
+# KIND <TAB> KEY <TAB> VALUE <TAB> SOURCE
+#
+# FORMAT_INFO_M      key = mask 0..7,     value = 15 bits, most significant first
+# RS_GENERATOR_EXP   key = EC codewords,  value = alpha exponents, high-order first
+# RS_GENERATOR_HEX   key = EC codewords,  value = the same polynomial as field elements
+# ALIGNMENT          key = version,       value = centre coordinates, or '-' for none
+# BLOCK_LAYOUT_M     key = version,       value = total,ecPerBlock,g1Blocks,g1Data,g2Blocks,g2Data
+# BYTE_CAPACITY_M    key = version,       value = capacity in bytes, byte mode
+FORMAT_INFO_M	0	101010000010010	ISO/IEC 18004 format information table, ECC level M; the same 15 bits are printed as a bit array in A. Leiradella, "QR Codes on the ZX81" (2020-08-02), leiradel.github.io/2020/08/02/QR-Codes-on-the-ZX81.html
+FORMAT_INFO_M	1	101000100100101	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+FORMAT_INFO_M	2	101111001111100	ISO/IEC 18004 Annex I worked example prints this string for its version 1-M mask-2 symbol; also in the format information table
+FORMAT_INFO_M	3	101101101001011	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+FORMAT_INFO_M	4	100010111111001	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+FORMAT_INFO_M	5	100000011001110	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+FORMAT_INFO_M	6	100111110010111	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+FORMAT_INFO_M	7	100101010100000	ISO/IEC 18004 format information table, ECC level M; reproduced at thonky.com/qr-code-tutorial/format-version-tables
+RS_GENERATOR_EXP	10	0,251,67,46,61,118,70,64,94,32,45	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	10	01D8C29F6FC75E5F719DC1	Published in decimal as [1,216,194,159,111,199,94,95,113,157,193] in A. Leiradella, "QR Codes on the ZX81" (2020-08-02) — an independent transcription in element form
+RS_GENERATOR_EXP	16	0,120,104,107,109,102,161,76,3,91,191,147,169,182,194,225,120	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	16	013B0D68BD44D11E08A34129E56232243B	The RS_GENERATOR_EXP row for 16, converted through the GF(256) antilog of ISO/IEC 18004 Annex A
+RS_GENERATOR_EXP	18	0,215,234,158,94,184,97,118,170,79,187,152,148,252,179,5,98,96,153	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	18	01EFFBB77195AFC7D7F0DC4952AD4B2043D992	The RS_GENERATOR_EXP row for 18, converted through the GF(256) antilog of ISO/IEC 18004 Annex A
+RS_GENERATOR_EXP	22	0,210,171,247,242,93,230,14,109,221,53,200,74,8,172,98,80,219,134,160,105,165,231	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	22	0159B383B0B6F413BD45281C891D7B43FD56DAE61A91F5	The RS_GENERATOR_EXP row for 22, converted through the GF(256) antilog of ISO/IEC 18004 Annex A
+RS_GENERATOR_EXP	24	0,229,121,135,48,211,117,251,126,159,180,169,152,192,226,228,218,111,0,117,232,87,96,227,21	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	24	017A76A946B2EDD8667396E54982483D2BCE01EDF77FD99075	The RS_GENERATOR_EXP row for 24, converted through the GF(256) antilog of ISO/IEC 18004 Annex A
+RS_GENERATOR_EXP	26	0,173,125,158,2,103,182,118,17,145,201,111,28,165,53,161,21,245,142,13,102,48,227,153,145,218,70	ISO/IEC 18004 Annex A generator polynomials; reproduced at thonky.com/qr-code-tutorial/generator-polynomial-tool
+RS_GENERATOR_HEX	26	01F633B7048862C7984D38CE189128D175E92A87444690924D2B5E	The RS_GENERATOR_EXP row for 26, converted through the GF(256) antilog of ISO/IEC 18004 Annex A
+ALIGNMENT	1	-	ISO/IEC 18004 Annex E alignment pattern centres: version 1 has none
+ALIGNMENT	2	6,18	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	3	6,22	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	4	6,26	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	5	6,30	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	6	6,34	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	7	6,22,38	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	8	6,24,42	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	9	6,26,46	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+ALIGNMENT	10	6,28,50	ISO/IEC 18004 Annex E, alignment pattern centre coordinates
+BLOCK_LAYOUT_M	1	26,10,1,16,0,0	ISO/IEC 18004 error correction characteristics table, version 1-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	2	44,16,1,28,0,0	ISO/IEC 18004 error correction characteristics table, version 2-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	3	70,26,1,44,0,0	ISO/IEC 18004 error correction characteristics table, version 3-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	4	100,18,2,32,0,0	ISO/IEC 18004 error correction characteristics table, version 4-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	5	134,24,2,43,0,0	ISO/IEC 18004 error correction characteristics table, version 5-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	6	172,16,4,27,0,0	ISO/IEC 18004 error correction characteristics table, version 6-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	7	196,18,4,31,0,0	ISO/IEC 18004 error correction characteristics table, version 7-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	8	242,22,2,38,2,39	ISO/IEC 18004 error correction characteristics table, version 8-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	9	292,22,3,36,2,37	ISO/IEC 18004 error correction characteristics table, version 9-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BLOCK_LAYOUT_M	10	346,26,4,43,1,44	ISO/IEC 18004 error correction characteristics table, version 10-M; reproduced at thonky.com/qr-code-tutorial/error-correction-table
+BYTE_CAPACITY_M	1	14	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	2	26	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	3	42	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	4	62	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	5	84	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	6	106	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	7	122	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	8	152	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	9	180	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities
+BYTE_CAPACITY_M	10	213	ISO/IEC 18004 character capacity table, byte mode, ECC level M; reproduced at thonky.com/qr-code-tutorial/character-capacities

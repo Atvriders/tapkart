@@ -37,6 +37,7 @@ describe('@tapkart/game workspace scaffold', () => {
       '@tapkart/net': '*',
       '@tapkart/content': '*',
       '@tapkart/render': '*',
+      '@tapkart/invite': '*',
     })
     expect((pkg.devDependencies as Record<string, string>).vite).toBe('^7.0.0')
   })

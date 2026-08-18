@@ -57,6 +57,16 @@ export const BRAKE_HOLD_TICKS = 18 // 0.3 s at 60 Hz
 
 export interface Rect { x: number; y: number; w: number; h: number } // CSS px, y down
 
+/** The whole left half is the touch-down steering surface for the two schemes
+ * that steer with a thumb. The race overlay uses this same helper for its
+ * guidance, so the visible boundary and the adapter boundary cannot drift. */
+export function steeringZoneRect(v: Viewport, out: Rect): void {
+  out.x = 0
+  out.y = 0
+  out.w = v.width * 0.5
+  out.h = v.height
+}
+
 /** Bottom-right, TOUCH_BUTTON_MARGIN_PX from both edges. */
 export function driftButtonRect(v: Viewport, out: Rect): void {
   out.x = v.width - TOUCH_BUTTON_MARGIN_PX - TOUCH_BUTTON_SIZE_PX
@@ -69,6 +79,18 @@ export function driftButtonRect(v: Viewport, out: Rect): void {
 export function itemButtonRect(v: Viewport, out: Rect): void {
   driftButtonRect(v, out)
   out.y -= TOUCH_BUTTON_GAP_PX + TOUCH_BUTTON_SIZE_PX
+}
+
+/** Virtual-stick gas pedal: one shared-control column to the left of drift. */
+export function gasButtonRect(v: Viewport, out: Rect): void {
+  driftButtonRect(v, out)
+  out.x -= TOUCH_BUTTON_GAP_PX + TOUCH_BUTTON_SIZE_PX
+}
+
+/** Virtual-stick brake pedal: one shared-control column to the left of item. */
+export function brakeButtonRect(v: Viewport, out: Rect): void {
+  itemButtonRect(v, out)
+  out.x -= TOUCH_BUTTON_GAP_PX + TOUCH_BUTTON_SIZE_PX
 }
 
 /** Half-open on the far edges: x in [r.x, r.x + r.w), y in [r.y, r.y + r.h). */

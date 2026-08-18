@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 *.local
+test-results/
+playwright-report/
 
 # SDD scratch: per-task reports and ledgers. They quote absolute host paths and
 # are working notes, not shipped content. The plan artifacts that matter live in
@@ -12,3 +14,19 @@ content/final-fix-wave-report.md
 content/pipeline/content-bundle.mjs
 content/pipeline/records-out/
 content/pipeline/*.results.jsonl
+
+# Contract §1 — generated Android/web output and signing material.
+*.jks
+*.keystore
+*.p12
+keystore.properties
+local.properties
+apps/android/local.properties
+apps/android/app/src/main/assets/public/
+apps/android/app/build/
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/web/dist/
+apps/web/.vite/
+apps/web/public/icons/
+packages/server/dist/

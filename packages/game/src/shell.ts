@@ -7,6 +7,7 @@
 // SCREEN_TRANSITIONS — the reducer's own table — so the two cannot disagree.
 import type { Intent, SimContext } from '@tapkart/sim'
 import { MAX_KARTS, RACE_LAPS } from '@tapkart/sim'
+import type { StartMessage, WelcomeMessage } from '@tapkart/protocol'
 import type { CharacterDescriptor, KartDescriptor, TrackTheme } from '@tapkart/content'
 import { CHARACTERS, TRACK_MANIFEST, TUNING, loadContentBundle, loadTrack } from '@tapkart/content'
 import type {
@@ -36,7 +37,16 @@ import {
   updateCamera,
 } from '@tapkart/render'
 import type { AppEvent, AppState } from './app'
-import { SCREEN_TRANSITIONS, createAppState, reduceApp } from './app'
+import {
+  SCREEN_TRANSITIONS,
+  SERVER_LOST_RACE_WARNING,
+  SERVER_LOST_RECOVERY_MESSAGE,
+  canAcceptInvite,
+  canChooseTrack,
+  canRequestStart,
+  createAppState,
+  reduceApp,
+} from './app'
 // AMENDMENT 4: the accumulator is @tapkart/net's, because packages/server runs the
 // same fixed-step pump and net may not import game. This file imports it from net
 // exactly as the server will, and it takes an elapsed DELTA -- so this file, the
@@ -44,20 +54,54 @@ import { SCREEN_TRANSITIONS, createAppState, reduceApp } from './app'
 // here and must never be: game/clock.ts is its only importer in the repository, and
 // clock.test.ts scans every packages/*/src tree on every run to keep that true.
 // Room codes come from @tapkart/protocol for the same one-copy reason.
-import { advanceAccumulator, makeTickAccumulator } from '@tapkart/net'
+import {
+  DEFAULT_ICE_SERVERS,
+  HARD_RESYNC_LIMIT,
+  HARD_RESYNC_WINDOW_TICKS,
+  advanceAccumulator,
+  makeTickAccumulator,
+} from '@tapkart/net'
+import { browserRtcFactory } from '@tapkart/net/webrtc-browser'
+import { browserWebSocket } from '@tapkart/net/websocket-browser'
 import { ROOM_CODE_LENGTH, normalizeRoomCode } from '@tapkart/protocol'
+import {
+  buildInviteUri,
+  buildQrMatrix,
+  nullNfcHost,
+  parseInviteUri,
+  qrModuleAt,
+  QR_QUIET_ZONE,
+  type NfcHost,
+} from '@tapkart/invite'
 import type { FrameClock } from './clock'
 import { accumulatorAlpha } from './clock'
-import type { ControlAdapter, ControlInputs, Viewport } from './controls/types'
+import type { ControlAdapter, ControlInputs, TiltSample, Viewport } from './controls/types'
 import { createControlInputs } from './controls/types'
-import type { ControlConfig } from './controls/config'
-import { DEFAULT_CONTROL_CONFIG } from './controls/config'
+import type { ControlConfig, Rect } from './controls/config'
+import {
+  DEFAULT_CONTROL_CONFIG,
+  TOUCH_BUTTON_MARGIN_PX,
+  brakeButtonRect,
+  driftButtonRect,
+  gasButtonRect,
+  itemButtonRect,
+  steeringZoneRect,
+} from './controls/config'
 import { makeControlAdapter } from './controls/index'
 import { attachInputSource, requestTiltPermission } from './controls/source'
+import { calibrateTilt } from './controls/tilt'
 import { createSoloTransport } from './localinput'
+import type { MultiplayerRoom } from './multiplayer'
+import { createMultiplayerRoom } from './multiplayer'
+import { createMultiplayerSession } from './multiplayer-session'
 import { buildResultRows } from './results'
 import type { KeyValueStore, Settings } from './settings'
-import { loadSettings, saveSettings } from './settings'
+import {
+  PLAYER_NAME_MAX,
+  loadSettings,
+  normalizePlayerName,
+  saveSettings,
+} from './settings'
 import type { RaceSession } from './session'
 import { createSession } from './session'
 import type { ViewBuilder } from './view'
@@ -70,16 +114,19 @@ export interface ShellOptions {
   store: KeyValueStore
   renderer: RendererBackend
   audio: AudioBackend // nullAudioBackend in v1 (Q26)
+  /** Optional so browser and headless call sites remain inert. */
+  nfc?: NfcHost
+  /** Browser defaults to location.origin. Native passes the deployed HTTPS
+   * origin for invites and networking instead of its capacitor:// asset origin. */
+  origin?: string
 }
 
 export interface GameShell {
   stop(): void
+  setAudio(next: AudioBackend): void
+  onIdle(cb: () => void): void
+  onRaceStateChange(cb: (racing: boolean) => void): void
 }
-
-/** Plan 3 ships no server, no signalling and no WebRTC (§12), so this is the
- *  honest answer to Host and Join until Plan 4 lands. A lobby that spins forever
- *  is not. */
-const MULTIPLAYER_MESSAGE = 'Multiplayer arrives in Plan 4 — press SOLO to race now.'
 
 /** Events that carry a payload get a dedicated control, or are raised by the
  *  shell itself; the rest become one button each, straight off the reducer's
@@ -94,6 +141,8 @@ const PAYLOAD_EVENTS = new Set<AppEvent['kind']>([
   'settingsChanged',
   'raceTick',
   'raceFinished',
+  'serverLostDuringRace',
+  'serverStartReceived',
 ])
 
 const BUTTON_LABELS: Readonly<Record<string, string | undefined>> = {
@@ -185,19 +234,117 @@ function countFilled(order: readonly number[]): number {
   return n
 }
 
+/** Draws a black-on-white symbol including the QR-standard quiet zone. */
+function drawQr(canvas: HTMLCanvasElement, text: string): void {
+  const matrix = buildQrMatrix(text)
+  const modules = matrix.size + QR_QUIET_ZONE * 2
+  const scale = Math.max(2, Math.floor(320 / modules))
+  canvas.width = modules * scale
+  canvas.height = modules * scale
+  canvas.style.width = `${canvas.width}px`
+  canvas.style.height = `${canvas.height}px`
+
+  const ctx = canvas.getContext('2d')
+  if (ctx === null) return
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = '#000000'
+  for (let y = 0; y < matrix.size; y++) {
+    for (let x = 0; x < matrix.size; x++) {
+      if (!qrModuleAt(matrix, x, y)) continue
+      ctx.fillRect(
+        (x + QR_QUIET_ZONE) * scale,
+        (y + QR_QUIET_ZONE) * scale,
+        scale,
+        scale,
+      )
+    }
+  }
+}
+
+/** The lobby's three simultaneous invite fallbacks: tap, QR, and the existing
+ * room-code element mounted by renderScreen. */
+function mountInvitePanel(
+  host: HTMLElement,
+  args: { origin: string; roomCode: string; nfc: NfcHost },
+): () => void {
+  const panel = document.createElement('div')
+  panel.setAttribute('data-testid', 'invite-panel')
+
+  const tap = document.createElement('p')
+  tap.setAttribute('data-testid', 'invite-tap')
+  tap.textContent = 'Hold another phone against the back of this one to join.'
+  panel.appendChild(tap)
+
+  let uri: string
+  try {
+    uri = buildInviteUri(args.origin, args.roomCode)
+  } catch {
+    // Local development is intentionally plain HTTP. Keep the typed room code
+    // usable there without weakening buildInviteUri's production HTTPS rule.
+    tap.textContent = 'Type the room code on the other device to join.'
+    host.appendChild(panel)
+    return () => panel.remove()
+  }
+
+  const qr = document.createElement('canvas')
+  qr.setAttribute('data-testid', 'invite-qr')
+  panel.appendChild(qr)
+  drawQr(qr, uri)
+  host.appendChild(panel)
+
+  void args.nfc.advertise(uri).catch(() => {
+    // QR and the typed room code remain available when NFC is absent or off.
+    tap.textContent = 'Scan the code or type it in to join.'
+  })
+
+  return () => {
+    void args.nfc.stop().catch(() => undefined)
+    panel.remove()
+  }
+}
+
+function webSocketUrl(origin: string): string {
+  const url = new URL('/ws', origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
+function sessionTokenKey(roomCode: string): string {
+  return `tapkart.session.${roomCode}`
+}
+
+function welcomeError(message: WelcomeMessage): string {
+  switch (message.result) {
+    case 'roomNotFound': return 'Room not found.'
+    case 'roomFull': return 'That room is full.'
+    case 'roomClosed': return 'That room is closed.'
+    case 'versionMismatch': return 'This game version cannot join that room.'
+    case 'rateLimited': return 'Too many join attempts. Try again shortly.'
+    case 'badRequest': return 'The room request was invalid.'
+    case 'ok': return ''
+  }
+}
+
 /** requestAnimationFrame loop, in this exact order:
  *    inputSource.drain -> advanceAccumulator -> N x (adapter.sample +
  *    session.tickOnce), with viewBuilder.build(1) after every non-final catch-up
  *    tick -> updateCamera(N ticks) -> the final viewBuilder.build(alpha) ->
  *    buildRenderFrame -> renderer.applyFrame -> buildHudModel -> DOM ->
- *    buildAudioModel -> audio.apply -> session.swapViews.
+ *    buildAudioModel -> activeAudio.apply -> session.swapViews.
  *
- *  Two things it does outside that loop: it calls audio.setConfig on every
+ *  Two things it does outside that loop: it calls activeAudio.setConfig on every
  *  Settings change and once at startup (R38 — never per frame), and it shows the
  *  rotate-your-device overlay while viewport.height > viewport.width (R40),
  *  skipping renderer.resize until the device is landscape again. */
 export function startShell(opts: ShellOptions): GameShell {
-  const { canvas, root, clock, store, renderer, audio } = opts
+  const { canvas, root, clock, store, renderer } = opts
+  const nfc: NfcHost = opts.nfc ?? nullNfcHost
+  const origin: string = opts.origin ?? window.location.origin
+  let activeAudio = opts.audio
+  // One allocation for every non-race transition. Reusing it also guarantees
+  // that no stale cue can survive from the race model.
+  const silentAudioModel = createAudioModel()
 
   // Plan 4's `race-canvas`. Set on the caller's canvas rather than on a wrapper:
   // the spec's comment is "the canvas startShell renders into", and a hook on a
@@ -206,20 +353,68 @@ export function startShell(opts: ShellOptions): GameShell {
 
   const screenEl = document.createElement('div')
   screenEl.className = 'tk-screen'
+  // Menu/form gestures are UI, not buffered race input. Without this boundary,
+  // tapping START can become the first steering pointer of the race.
+  for (const kind of [
+    'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'keydown', 'keyup',
+  ]) {
+    screenEl.addEventListener(kind, (event) => event.stopPropagation())
+  }
   const hudEl = document.createElement('div')
   hudEl.className = 'tk-hud'
   const rotateEl = document.createElement('div')
   rotateEl.className = 'tk-rotate'
   rotateEl.textContent = 'Rotate your device'
-  root.append(screenEl, hudEl, rotateEl)
+
+  // A visual map of the exact pure hit geometry. It never receives race input:
+  // pointer events pass through to the canvas/window source, except for QUIT,
+  // whose pointer sequence is stopped locally before it can become steering.
+  const controlsEl = document.createElement('div')
+  controlsEl.className = 'tk-controls tk-hidden'
+  controlsEl.setAttribute('data-control-overlay', '')
+  const steerGuideEl = document.createElement('div')
+  steerGuideEl.className = 'tk-steer-guide'
+  steerGuideEl.setAttribute('data-control', 'steer')
+  steerGuideEl.setAttribute('aria-hidden', 'true')
+
+  function affordance(name: string, label: string): HTMLDivElement {
+    const el = document.createElement('div')
+    el.className = 'tk-control-affordance'
+    el.setAttribute('data-control', name)
+    el.setAttribute('aria-hidden', 'true')
+    el.textContent = label
+    return el
+  }
+
+  const driftControlEl = affordance('drift', 'DRIFT')
+  const itemControlEl = affordance('item', 'ITEM')
+  const gasControlEl = affordance('gas', 'GAS')
+  const brakeControlEl = affordance('brake', 'BRAKE')
+  const raceQuitEl = button('QUIT', () => dispatch({ kind: 'quitToTitle' }))
+  raceQuitEl.classList.add('tk-race-quit')
+  raceQuitEl.setAttribute('data-action', 'quit-race')
+  raceQuitEl.setAttribute('aria-label', 'Quit race')
+  for (const kind of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+    raceQuitEl.addEventListener(kind, (event) => event.stopPropagation())
+  }
+  controlsEl.append(
+    steerGuideEl,
+    driftControlEl,
+    itemControlEl,
+    gasControlEl,
+    brakeControlEl,
+    raceQuitEl,
+  )
+  root.append(screenEl, hudEl, controlsEl, rotateEl)
 
   let settings = loadSettings(store)
   let app: AppState = createAppState(settings)
   // R38: once at startup and on every Settings change, never per frame.
-  audio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
+  activeAudio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
 
   const viewport: Viewport = { width: window.innerWidth, height: window.innerHeight }
   const inputSource = attachInputSource(window, viewport)
+  const calibrationSample: TiltSample = { alpha: 0, beta: 0, gamma: 0 }
   const rawInputs: ControlInputs = createControlInputs()
   const intent: Intent = {
     tick: 0,
@@ -236,19 +431,180 @@ export function startShell(opts: ShellOptions): GameShell {
   let lastNowMs = clock.nowMs()
 
   let race: Race | null = null
+  let multiplayer: MultiplayerRoom | null = null
+  let pendingStart: StartMessage | null = null
+  const hardResyncTicks: number[] = []
   let lastW = -1
   let lastH = -1
   let lastDpr = -1
   let running = true
   let rafId = 0
-  /** Plan 4's `ready-button` state. Local only: AppState has no `ready` for the
-   *  local player to set and no `readyPressed` event, because readiness is lobby
-   *  traffic and the lobby is Plan 4's (§12). This is the flag Plan 4 replaces
-   *  with the server's answer — not a shadow copy of one that already exists. */
+  let idleCallback: (() => void) | null = null
+  let raceStateCallback: ((racing: boolean) => void) | null = null
+  let unmountInvitePanel: (() => void) | null = null
   let localReady = false
+  let readerWanted: boolean | null = null
+  let settingsNotice = ''
+  let settingsExpanded = false
+  let tiltCalibrationPending = false
+  let tiltPermissionRequest = 0
+  let controlsW = -1
+  let controlsH = -1
+  let controlsScheme: Settings['scheme'] | null = null
+
+  const steerOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const driftOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const itemOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const gasOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const brakeOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+
+  function placeControl(el: HTMLElement, rect: Rect): void {
+    el.style.left = `${rect.x}px`
+    el.style.top = `${rect.y}px`
+    el.style.width = `${rect.w}px`
+    el.style.height = `${rect.h}px`
+  }
+
+  function syncRaceControls(portrait: boolean): void {
+    const visible = app.screen === 'race' && !portrait
+    controlsEl.classList.toggle('tk-hidden', !visible)
+    if (!visible) return
+    if (
+      controlsW === viewport.width &&
+      controlsH === viewport.height &&
+      controlsScheme === settings.scheme
+    ) return
+
+    controlsW = viewport.width
+    controlsH = viewport.height
+    controlsScheme = settings.scheme
+    controlsEl.setAttribute('data-scheme', settings.scheme)
+    steeringZoneRect(viewport, steerOverlayRect)
+    driftButtonRect(viewport, driftOverlayRect)
+    itemButtonRect(viewport, itemOverlayRect)
+    gasButtonRect(viewport, gasOverlayRect)
+    brakeButtonRect(viewport, brakeOverlayRect)
+    placeControl(steerGuideEl, steerOverlayRect)
+    placeControl(driftControlEl, driftOverlayRect)
+    placeControl(itemControlEl, itemOverlayRect)
+    placeControl(gasControlEl, gasOverlayRect)
+    placeControl(brakeControlEl, brakeOverlayRect)
+    steerGuideEl.textContent = settings.scheme === 'tilt'
+      ? 'TILT PHONE ↔ TO STEER'
+      : settings.scheme === 'virtualStick'
+        ? 'VIRTUAL STICK · TOUCH + SLIDE ↔'
+        : 'TOUCH + SLIDE ↔ TO STEER'
+    const pedals = settings.scheme === 'virtualStick'
+    gasControlEl.classList.toggle('tk-hidden', !pedals)
+    brakeControlEl.classList.toggle('tk-hidden', !pedals)
+    raceQuitEl.style.top = `${TOUCH_BUTTON_MARGIN_PX}px`
+    raceQuitEl.style.right = `${TOUCH_BUTTON_MARGIN_PX}px`
+  }
+
+  function reconcileReader(): void {
+    const wanted = canAcceptInvite(app)
+    if (wanted === readerWanted) return
+    readerWanted = wanted
+    void (wanted ? nfc.startReader() : nfc.stopReader()).catch(() => undefined)
+  }
+
+  function closeMultiplayer(): void {
+    const old = multiplayer
+    multiplayer = null
+    pendingStart = null
+    hardResyncTicks.length = 0
+    localReady = false
+    old?.close()
+  }
+
+  function multiplayerPlayerName(role: 'host' | 'guest'): string {
+    return settings.playerName === '' ? (role === 'host' ? 'Host' : 'Guest') : settings.playerName
+  }
+
+  function beginMultiplayer(role: 'host' | 'guest', roomCode: string): void {
+    closeMultiplayer()
+    let next: MultiplayerRoom
+    try {
+      next = createMultiplayerRoom({
+        socket: browserWebSocket(webSocketUrl(origin)),
+        rtcFactory: browserRtcFactory,
+        iceServers: DEFAULT_ICE_SERVERS,
+        role,
+        name: multiplayerPlayerName(role),
+        characterIdx: settings.characterIdx,
+        roomCode,
+        token: roomCode === '' ? '' : store.get(sessionTokenKey(roomCode)) ?? '',
+        trackId: role === 'host' ? app.trackId : '',
+      })
+    } catch {
+      dispatch({ kind: 'connectFailed', message: 'Could not open the multiplayer connection.' })
+      return
+    }
+    multiplayer = next
+
+    next.onWelcome((message) => {
+      if (multiplayer !== next) return
+      if (message.result !== 'ok') {
+        dispatch({ kind: 'connectFailed', message: welcomeError(message) })
+        return
+      }
+      store.set(sessionTokenKey(message.roomCode), message.token)
+      dispatch({
+        kind: 'connected',
+        roomCode: message.roomCode,
+        localPlayerId: message.playerId,
+        role: next.state().role,
+      })
+      // The multiplayer E2E (and a returning player) already has a saved choice;
+      // do not force a second character-selection stop after the handshake.
+      dispatch({ kind: 'characterChosen', characterIdx: settings.characterIdx })
+      // An edit made while the hello was in flight could not be sent yet. The
+      // post-welcome update makes the persisted field authoritative either way.
+      // Use the server-confirmed role: a reconnect token can restore the room
+      // creator even though the deep-link/typed entry path requested `guest`.
+      next.update({ name: multiplayerPlayerName(next.state().role) })
+    })
+    next.onLobby((message) => {
+      if (multiplayer !== next) return
+      const slots = message.slots.map((slot, playerId) => ({
+        playerId: slot.occupied ? playerId : -1,
+        name: slot.name,
+        characterIdx: slot.characterIdx,
+        isBot: slot.isBot,
+        connected: slot.connected,
+        ready: slot.ready,
+      }))
+      const local = message.slots[app.localPlayerId]
+      if (local !== undefined && local.occupied) localReady = local.ready
+      dispatch({ kind: 'lobbyUpdated', slots, trackId: message.trackId })
+    })
+    next.onStart((message) => {
+      if (multiplayer !== next) return
+      pendingStart = message
+      // StartMessage is the final server truth, including for a guest whose last
+      // lobby frame raced the start frame.
+      dispatch({ kind: 'lobbyUpdated', slots: app.slots, trackId: message.trackId })
+      if (app.screen === 'race' || app.screen === 'results') {
+        dispatch({ kind: 'serverStartReceived' })
+      }
+      dispatch({ kind: 'raceStarting' })
+    })
+    next.onClosed((reason) => {
+      if (multiplayer !== next || reason === 'closed') return
+      dispatch({ kind: 'connectFailed', message: reason === 'roomNotFound' ? 'Room not found.' : 'The room connection closed.' })
+    })
+    next.start()
+  }
 
   function startRace(st: AppState): Race {
-    const loaded = loadTrack(st.trackId)
+    // A ControlAdapter is intentionally shared across screens. Clear every
+    // held pointer/key and edge latch before a new simulation consumes it.
+    adapter.reset()
+    const serverStart = st.role === 'solo' ? null : pendingStart
+    if (st.role !== 'solo' && (serverStart === null || multiplayer === null)) {
+      throw new Error('startRace: multiplayer requires the server StartMessage and a live room')
+    }
+    const loaded = loadTrack(serverStart?.trackId ?? st.trackId)
     const bundle = loadContentBundle()
     const ctx: SimContext = {
       track: loaded.track,
@@ -259,27 +615,43 @@ export function startShell(opts: ShellOptions): GameShell {
       characters: CHARACTERS.slice(),
       isLeader: st.role !== 'guest',
     }
-    const characterIdx: number[] = []
-    for (let i = 0; i < MAX_KARTS; i++) {
-      characterIdx.push(
-        st.role === 'solo'
-          ? i === st.localPlayerId
-            ? st.settings.characterIdx
-            : i % CHARACTERS.length
-          : st.slots[i].characterIdx,
-      )
+    const characterIdx: number[] = serverStart?.characterIdx.slice() ?? []
+    if (serverStart === null) {
+      for (let i = 0; i < MAX_KARTS; i++) {
+        characterIdx.push(i === st.localPlayerId ? st.settings.characterIdx : i % CHARACTERS.length)
+      }
     }
 
-    const session = createSession({
-      role: st.role,
-      ctx,
-      localPlayerId: st.localPlayerId >= 0 ? st.localPlayerId : 0,
-      seed: seedFor(st.roomCode),
-      characterIdx,
-      // Plan 3 has exactly one transport source. Plan 4 supplies the real one
-      // and this is the only line that changes.
-      transport: createSoloTransport(),
-    })
+    const localPlayerId = st.localPlayerId >= 0 ? st.localPlayerId : 0
+    const session = serverStart === null
+      ? createSession({
+        role: 'solo',
+        ctx,
+        localPlayerId,
+        seed: seedFor(st.roomCode),
+        characterIdx,
+        transport: createSoloTransport(),
+      })
+      : createMultiplayerSession({
+        room: multiplayer!,
+        role: st.role === 'host' ? 'host' : 'guest',
+        ctx,
+        localPlayerId,
+        start: serverStart,
+      })
+    if (st.role !== 'solo') {
+      session.onHardResync((tick) => {
+        hardResyncTicks.push(tick)
+        while (
+          hardResyncTicks.length > 0 &&
+          tick - hardResyncTicks[0] > HARD_RESYNC_WINDOW_TICKS
+        ) hardResyncTicks.shift()
+        if (hardResyncTicks.length >= HARD_RESYNC_LIMIT) {
+          multiplayer?.requestResync('divergence', tick)
+          hardResyncTicks.length = 0
+        }
+      })
+    }
 
     const kartMeshes: MeshData[] = bundle.karts.map(buildKartMesh)
     const characterMeshes: MeshData[] = bundle.characters.map(buildCharacterMesh)
@@ -311,32 +683,86 @@ export function startShell(opts: ShellOptions): GameShell {
     }
   }
 
+  function silenceAudio(): void {
+    activeAudio.apply(silentAudioModel)
+  }
+
+  function disposeInvitePanel(): void {
+    if (unmountInvitePanel === null) return
+    unmountInvitePanel()
+    unmountInvitePanel = null
+  }
+
   function endRace(): void {
     if (race === null) return
+    // Results/title frames continue draining DOM input without sampling the
+    // adapter. Reset here so a held drift, pedal or stick cannot leak into a
+    // rematch even if its release happened between races.
+    adapter.reset()
+    // The last race model may contain both continuous gain and one-frame cues.
+    // Clear it before the session and its views become unreachable.
+    silenceAudio()
     race.session.close()
     race = null
     hudEl.replaceChildren()
+    raceStateCallback?.(false)
   }
 
   function dispatch(ev: AppEvent): void {
+    // HOST/JOIN/SOLO are mutually exclusive compositions. A player can switch
+    // while a WebSocket handshake is still pending; detach that room first so
+    // its late Welcome cannot overwrite the newly selected mode.
+    if (
+      ev.kind === 'connectFailed' || ev.kind === 'quitToTitle' ||
+      ev.kind === 'hostPressed' || ev.kind === 'joinPressed' || ev.kind === 'soloPressed'
+    ) closeMultiplayer()
     const next = reduceApp(app, ev)
     if (next === app) return // an illegal event is an identity no-op, by reference
     const prevScreen = app.screen
     app = next
+    reconcileReader()
 
     if (next.settings !== settings) {
       settings = next.settings
       saveSettings(store, settings)
-      audio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
+      activeAudio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
       adapter = makeControlAdapter(settings.scheme, controlConfigFor(settings))
       adapter.reset()
     }
     if (next.screen !== prevScreen) {
-      if (next.screen === 'race') race = startRace(next)
-      else endRace()
+      if (next.screen === 'race') {
+        race = startRace(next)
+        raceStateCallback?.(true)
+      } else {
+        endRace()
+      }
     }
     renderScreen()
+    if (next.screen !== prevScreen && (next.screen === 'results' || next.screen === 'title')) {
+      idleCallback?.()
+    }
   }
+
+  function joinByCode(code: string): void {
+    if (app.role !== 'guest') dispatch({ kind: 'joinPressed' })
+    dispatch({ kind: 'roomCodeEntered', code })
+    if (app.connecting && app.role === 'guest') beginMultiplayer('guest', app.roomCode)
+  }
+
+  // Both live plugin events and a cold-start launch URI enter the same parser
+  // and connection path as the typed room-code form.
+  function handleInvite(uri: string): void {
+    if (!running) return
+    const invite = parseInviteUri(uri)
+    if (invite === null || invite.origin !== origin || !canAcceptInvite(app)) return
+    joinByCode(invite.roomCode)
+  }
+
+  const offInvite = nfc.onInvite(handleInvite)
+  reconcileReader()
+  void nfc.pendingInvite().then((uri) => {
+    if (uri !== null) handleInvite(uri)
+  }).catch(() => undefined)
 
   // --- screen DOM ---------------------------------------------------------
   function button(label: string, onClick: () => void, testId?: string): HTMLButtonElement {
@@ -350,26 +776,61 @@ export function startShell(opts: ShellOptions): GameShell {
 
   function selectScheme(scheme: Settings['scheme']): void {
     if (scheme !== 'tilt') {
+      tiltPermissionRequest++
+      tiltCalibrationPending = false
+      settingsNotice = ''
       dispatch({ kind: 'settingsChanged', settings: { ...settings, scheme } })
       return
     }
-    // Q22: the permission is requested on the tap that SELECTS tilt, which is
-    // the unambiguous user gesture iOS requires. On denial the selection reverts
-    // and the reason is shown — silent fallback is forbidden.
+    // Q22: request permission from this user gesture, but do not select tilt
+    // until a later CALIBRATE gesture snapshots a real sensor sample.
+    const request = ++tiltPermissionRequest
+    tiltCalibrationPending = false
+    settingsNotice = 'Requesting motion access…'
+    renderScreen()
     void requestTiltPermission().then((granted) => {
+      if (!running || request !== tiltPermissionRequest) return
       if (granted) {
-        dispatch({ kind: 'settingsChanged', settings: { ...settings, scheme: 'tilt' } })
+        tiltCalibrationPending = true
+        settingsNotice = 'Hold the phone in your neutral driving position, then tap CALIBRATE.'
       } else {
-        dispatch({
-          kind: 'connectFailed',
-          message: 'Motion access was denied, so tilt steering is unavailable.',
-        })
+        // This is settings-local, never a connection failure. In particular, a
+        // host can deny the OS prompt without destroying the live room.
+        tiltCalibrationPending = false
+        settingsNotice = 'Motion access was denied. Your previous controls are still selected.'
       }
+      renderScreen()
+    })
+  }
+
+  function calibrateSelectedTilt(): void {
+    if (!tiltCalibrationPending) return
+    if (!inputSource.snapshotTilt(calibrationSample)) {
+      settingsNotice = 'No motion reading yet. Keep the phone neutral and tap CALIBRATE again.'
+      renderScreen()
+      return
+    }
+    tiltCalibrationPending = false
+    settingsNotice = 'Tilt steering calibrated.'
+    dispatch({
+      kind: 'settingsChanged',
+      settings: {
+        ...settings,
+        scheme: 'tilt',
+        tiltCalibration: calibrateTilt(calibrationSample),
+      },
     })
   }
 
   function renderScreen(): void {
+    // Re-rendering the same lobby (ready/settings/track changes) must not race a
+    // stop against a fresh advertise call. Re-advertising the same/current URI
+    // is idempotent; the disposer runs only when the invite ceases to be live.
+    if (app.screen !== 'lobby' || app.role !== 'host' || app.roomCode === '') {
+      disposeInvitePanel()
+    }
     screenEl.replaceChildren()
+    syncRaceControls(viewport.height > viewport.width)
     if (app.screen === 'race') {
       screenEl.classList.add('tk-hidden')
       return
@@ -410,16 +871,18 @@ export function startShell(opts: ShellOptions): GameShell {
       for (let i = 0; i < descriptors.length; i++) {
         const idx = i
         row.append(
-          button(descriptors[idx].name, () =>
-            dispatch({ kind: 'characterChosen', characterIdx: idx }),
-          ),
+          button(descriptors[idx].name, () => {
+            dispatch({ kind: 'characterChosen', characterIdx: idx })
+            multiplayer?.update({ characterIdx: idx })
+          }),
         )
       }
       screenEl.append(row)
     }
 
-    if (legal.includes('trackChosen')) {
+    if (legal.includes('trackChosen') && canChooseTrack(app)) {
       const sel = document.createElement('select')
+      sel.setAttribute('aria-label', 'Track')
       for (const entry of TRACK_MANIFEST) {
         const o = document.createElement('option')
         o.value = entry.id
@@ -427,13 +890,14 @@ export function startShell(opts: ShellOptions): GameShell {
         if (entry.id === app.trackId) o.selected = true
         sel.append(o)
       }
-      sel.addEventListener('change', () =>
-        dispatch({ kind: 'trackChosen', trackId: sel.value }),
-      )
+      sel.addEventListener('change', () => {
+        dispatch({ kind: 'trackChosen', trackId: sel.value })
+        multiplayer?.update({ trackId: sel.value })
+      })
       screenEl.append(sel)
     }
 
-    if (legal.includes('roomCodeEntered')) {
+    if (legal.includes('roomCodeEntered') && app.role === 'guest') {
       const input = document.createElement('input')
       input.placeholder = 'ROOM CODE'
       input.maxLength = ROOM_CODE_LENGTH
@@ -441,8 +905,7 @@ export function startShell(opts: ShellOptions): GameShell {
       const go = button(
         'GO',
         () => {
-          const code = normalizeRoomCode(input.value)
-          dispatch({ kind: 'roomCodeEntered', code })
+          joinByCode(normalizeRoomCode(input.value))
         },
         TESTIDS.roomCodeSubmit,
       )
@@ -450,22 +913,129 @@ export function startShell(opts: ShellOptions): GameShell {
     }
 
     if (legal.includes('settingsChanged')) {
+      const panel = document.createElement('section')
+      panel.className = 'tk-settings'
+      panel.setAttribute('aria-label', 'Settings')
+      const expanded = settingsExpanded || tiltCalibrationPending || settingsNotice !== ''
+      panel.setAttribute('data-expanded', String(expanded))
+      const settingsToggle = button('SETTINGS', () => {
+        if (expanded) {
+          settingsExpanded = false
+          settingsNotice = ''
+          tiltPermissionRequest++
+          tiltCalibrationPending = false
+        } else {
+          settingsExpanded = true
+        }
+        renderScreen()
+      })
+      settingsToggle.classList.add('tk-settings-toggle')
+      settingsToggle.setAttribute('aria-expanded', String(expanded))
+      const settingsContent = document.createElement('div')
+      settingsContent.className = 'tk-settings-content'
+      settingsContent.classList.toggle('tk-hidden', !expanded)
+      panel.append(settingsToggle, settingsContent)
+
+      const identityRow = document.createElement('div')
+      identityRow.className = 'tk-row tk-settings-fields'
+      const nameLabel = document.createElement('label')
+      nameLabel.textContent = 'PLAYER NAME '
+      const nameInput = document.createElement('input')
+      nameInput.type = 'text'
+      nameInput.value = settings.playerName
+      nameInput.placeholder = 'Host / Guest'
+      nameInput.maxLength = PLAYER_NAME_MAX
+      nameInput.setAttribute('autocomplete', 'nickname')
+      nameInput.setAttribute('aria-label', 'Player name')
+      nameInput.setAttribute('data-setting', 'player-name')
+      nameInput.addEventListener('change', () => {
+        const playerName = normalizePlayerName(nameInput.value)
+        if (playerName === null) {
+          settingsNotice = `Name must fit ${PLAYER_NAME_MAX} characters and the multiplayer limit.`
+          renderScreen()
+          return
+        }
+        settingsNotice = ''
+        dispatch({ kind: 'settingsChanged', settings: { ...settings, playerName } })
+        if (app.role === 'host' || app.role === 'guest') {
+          multiplayer?.update({ name: multiplayerPlayerName(app.role) })
+        }
+      })
+      nameLabel.append(nameInput)
+
+      const volumeLabel = document.createElement('label')
+      const volumeValue = document.createElement('span')
+      volumeValue.textContent = `VOLUME ${Math.round(settings.audioVolume * 100)}% `
+      const volumeInput = document.createElement('input')
+      volumeInput.type = 'range'
+      volumeInput.min = '0'
+      volumeInput.max = '1'
+      volumeInput.step = '0.05'
+      volumeInput.value = String(settings.audioVolume)
+      volumeInput.setAttribute('aria-label', 'Audio volume')
+      volumeInput.setAttribute('data-setting', 'audio-volume')
+      volumeInput.addEventListener('change', () => {
+        const audioVolume = Number(volumeInput.value)
+        if (!Number.isFinite(audioVolume) || audioVolume < 0 || audioVolume > 1) return
+        settingsNotice = ''
+        dispatch({ kind: 'settingsChanged', settings: { ...settings, audioVolume } })
+      })
+      volumeLabel.append(volumeValue, volumeInput)
+      identityRow.append(nameLabel, volumeLabel)
+      settingsContent.append(identityRow)
+
       const row = document.createElement('div')
       row.className = 'tk-row'
       for (const scheme of ['thumbZones', 'tilt', 'virtualStick'] as const) {
         const b = button(scheme, () => selectScheme(scheme))
         if (settings.scheme === scheme) b.classList.add('tk-on')
+        b.setAttribute('aria-pressed', String(settings.scheme === scheme))
+        b.setAttribute('data-setting', `scheme-${scheme}`)
         row.append(b)
       }
-      row.append(
-        button(settings.audioEnabled ? 'AUDIO ON' : 'AUDIO OFF', () =>
+      if (tiltCalibrationPending) {
+        const calibrate = button('CALIBRATE', calibrateSelectedTilt)
+        calibrate.setAttribute('data-setting', 'calibrate-tilt')
+        row.append(calibrate)
+      }
+      if (settings.scheme === 'tilt') {
+        const invert = button(
+          settings.invertTilt ? 'INVERT TILT ON' : 'INVERT TILT OFF',
+          () => {
+            settingsNotice = ''
+            dispatch({
+              kind: 'settingsChanged',
+              settings: { ...settings, invertTilt: !settings.invertTilt },
+            })
+          },
+        )
+        invert.setAttribute('aria-pressed', String(settings.invertTilt))
+        invert.setAttribute('data-setting', 'invert-tilt')
+        row.append(invert)
+      }
+      const audioToggle = button(
+        settings.audioEnabled ? 'AUDIO ON' : 'AUDIO OFF',
+        () => {
+          settingsNotice = ''
           dispatch({
             kind: 'settingsChanged',
             settings: { ...settings, audioEnabled: !settings.audioEnabled },
-          }),
-        ),
+          })
+        },
       )
-      screenEl.append(row)
+      audioToggle.setAttribute('aria-pressed', String(settings.audioEnabled))
+      audioToggle.setAttribute('data-setting', 'audio-enabled')
+      row.append(audioToggle)
+      settingsContent.append(row)
+      if (settingsNotice !== '') {
+        const notice = document.createElement('p')
+        notice.className = 'tk-settings-note'
+        notice.setAttribute('data-settings-note', '')
+        notice.setAttribute('role', 'status')
+        notice.textContent = settingsNotice
+        settingsContent.append(notice)
+      }
+      screenEl.append(panel)
     }
 
     if (app.screen === 'results') {
@@ -483,15 +1053,37 @@ export function startShell(opts: ShellOptions): GameShell {
       screenEl.append(panel)
     }
 
+    // A solo lobby deliberately has no room code. Only a connected host/guest
+    // room can produce a valid invite URI; Plan 4 supplies that connection.
+    if (app.screen === 'lobby' && app.role === 'host' && app.roomCode !== '') {
+      unmountInvitePanel = mountInvitePanel(screenEl, {
+        origin,
+        roomCode: app.roomCode,
+        nfc,
+      })
+    }
+
     if (app.screen === 'lobby') {
-      // Plan 4's `ready-button`. Plan 3 has no lobby traffic (§12) and no
-      // `readyPressed` AppEvent, so this toggles a local flag and nothing more —
-      // Plan 4 wires it to the server. The hook is still this plan's obligation:
-      // what the E2E asserts is that the control is on the lobby screen.
+      const occupied = app.slots.filter((slot) => slot.playerId !== -1)
+      if (occupied.length > 0) {
+        const players = document.createElement('ul')
+        players.className = 'tk-lobby-players'
+        players.setAttribute('aria-label', 'Lobby players')
+        for (const slot of occupied) {
+          const player = document.createElement('li')
+          player.textContent = `${slot.name}${slot.ready ? ' · READY' : ''}`
+          players.append(player)
+        }
+        screenEl.append(players)
+      }
+    }
+
+    if (app.screen === 'lobby') {
       const ready = button(
         localReady ? 'READY ✓' : 'READY',
         () => {
           localReady = !localReady
+          multiplayer?.update({ ready: localReady })
           renderScreen()
         },
         TESTIDS.readyButton,
@@ -503,20 +1095,30 @@ export function startShell(opts: ShellOptions): GameShell {
     actions.className = 'tk-row'
     for (const kind of legal) {
       if (PAYLOAD_EVENTS.has(kind)) continue
+      if (kind === 'raceStarting' && !canRequestStart(app)) continue
       const label = BUTTON_LABELS[kind] ?? kind
       actions.append(
         button(
           label,
           () => {
-            dispatch({ kind } as AppEvent)
-            if (kind === 'hostPressed' || kind === 'joinPressed') {
-              dispatch({ kind: 'connectFailed', message: MULTIPLAYER_MESSAGE })
+            if (kind === 'hostPressed') {
+              dispatch({ kind: 'hostPressed' })
+              beginMultiplayer('host', '')
+              return
             }
+            if (kind === 'raceStarting' && app.role === 'host') {
+              multiplayer?.requestStart()
+              return
+            }
+            if (kind === 'backToLobby') {
+              if (app.serverLost) {
+                dispatch({ kind: 'connectFailed', message: SERVER_LOST_RECOVERY_MESSAGE })
+                return
+              }
+              multiplayer?.returnToLobby()
+            }
+            dispatch({ kind } as AppEvent)
           },
-          // `start-button` rides on `raceStarting`, which SCREEN_TRANSITIONS
-          // only allows on the lobby screen — so Plan 4's `toHaveCount(0)`
-          // assertion for a guest is satisfied by the reducer's own table once
-          // Plan 4 makes the event host-only, not by a second rule here.
           BUTTON_TESTIDS[kind],
         ),
       )
@@ -534,11 +1136,13 @@ export function startShell(opts: ShellOptions): GameShell {
   const hudClock = document.createElement('div')
   const hudItem = document.createElement('div')
   const hudCountdown = document.createElement('div')
+  const hudConnection = document.createElement('div')
+  hudConnection.className = 'tk-error'
   hudCountdown.className = 'tk-countdown'
 
   function paintHud(hud: HudModel): void {
     if (hudEl.childElementCount === 0) {
-      hudEl.append(hudPlace, hudLap, hudSpeed, hudClock, hudItem, hudCountdown)
+      hudEl.append(hudPlace, hudLap, hudSpeed, hudClock, hudItem, hudConnection, hudCountdown)
     }
     hudEl.classList.toggle('tk-hidden', !hud.visible)
     hudPlace.textContent = `${hud.place}/${hud.fieldSize}`
@@ -546,6 +1150,7 @@ export function startShell(opts: ShellOptions): GameShell {
     hudSpeed.textContent = `${hud.speedKph} KM/H`
     hudClock.textContent = hud.raceClock
     hudItem.textContent = hud.itemReady ? hud.item.toUpperCase() : ''
+    hudConnection.textContent = app.serverLost ? SERVER_LOST_RACE_WARNING : ''
     hudCountdown.textContent = hud.countdownLabel
   }
 
@@ -567,6 +1172,7 @@ export function startShell(opts: ShellOptions): GameShell {
     // out for. The canvas is not resized until the device is landscape again.
     const portrait = viewport.height > viewport.width
     rotateEl.classList.toggle('tk-hidden', !portrait)
+    syncRaceControls(portrait)
     if (!portrait) {
       const dpr = window.devicePixelRatio
       if (viewport.width !== lastW || viewport.height !== lastH || dpr !== lastDpr) {
@@ -579,6 +1185,10 @@ export function startShell(opts: ShellOptions): GameShell {
 
     inputSource.drain(rawInputs)
     const nowMs = clock.nowMs()
+    multiplayer?.poll(nowMs)
+    if (multiplayer?.state().serverLost === true && !app.serverLost) {
+      dispatch({ kind: 'serverLostDuringRace' })
+    }
     const ticks = advanceAccumulator(acc, nowMs - lastNowMs)
     lastNowMs = nowMs
     const r = race
@@ -617,8 +1227,8 @@ export function startShell(opts: ShellOptions): GameShell {
     buildHudModel(view, RACE_LAPS, r.hud)
     paintHud(r.hud)
     buildAudioModel(r.session.prevView(), view, r.audioModel)
-    audio.apply(r.audioModel)
-    // AFTER audio.apply, never before: the cues raised by this frame's delta are
+    activeAudio.apply(r.audioModel)
+    // AFTER activeAudio.apply, never before: the cues raised by this frame's delta are
     // consumed above, and swapping any earlier drops them. Not swapping at all
     // (one shared view) makes every delta empty and no one-shot cue can fire.
     r.session.swapViews()
@@ -631,6 +1241,7 @@ export function startShell(opts: ShellOptions): GameShell {
     }
     if (view.phase === 'finished' && !r.reportedFinish) {
       r.reportedFinish = true
+      multiplayer?.finishRace()
       dispatch({ kind: 'raceFinished', results: buildResultRows(view, app.slots) })
     }
   }
@@ -640,15 +1251,49 @@ export function startShell(opts: ShellOptions): GameShell {
 
   return {
     stop(): void {
+      if (!running) return
       running = false
       cancelAnimationFrame(rafId)
       inputSource.detach()
+      readerWanted = false
+      void nfc.stopReader().catch(() => undefined)
+      disposeInvitePanel()
+      offInvite()
+      if (race === null) silenceAudio()
       endRace()
+      closeMultiplayer()
       renderer.dispose()
-      audio.close()
+      activeAudio.close()
       screenEl.remove()
       hudEl.remove()
+      controlsEl.remove()
       rotateEl.remove()
+    },
+    setAudio(next: AudioBackend): void {
+      if (!running) {
+        next.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
+        next.apply(silentAudioModel)
+        next.close()
+        return
+      }
+      if (next === activeAudio) {
+        activeAudio.setConfig({
+          masterGain: settings.audioVolume,
+          enabled: settings.audioEnabled,
+        })
+        return
+      }
+      silenceAudio()
+      activeAudio.close()
+      activeAudio = next
+      activeAudio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
+      activeAudio.apply(silentAudioModel)
+    },
+    onIdle(cb: () => void): void {
+      idleCallback = cb
+    },
+    onRaceStateChange(cb: (racing: boolean) => void): void {
+      raceStateCallback = cb
     },
   }
 }

@@ -1387,14 +1387,17 @@ VM every run, so every CI build would carry a different certificate and no stati
 *"Neither draft could verify these and neither should invent them."* The binding
 constraints:
 
-| Pin | Rule |
-|---|---|
-| Capacitor major | Pinned in `apps/android/package.json`, per spec §9 |
-| AGP, Gradle wrapper, Kotlin plugin | Taken from that Capacitor version's template **unmodified** |
-| `targetSdk` | **≥ the Android 16 API level.** Spec §2's entire argument is about Android 16 behaviour; a lower target opts out of it |
-| `compileSdk` | **`= targetSdk`** |
-| `minSdk` | **`max(the pinned Capacitor major's floor, 26)`.** HCE needs API 19, so Capacitor's floor is what actually binds; 26 is the sensible modern floor and picking it too low silently ships to devices nothing was tested on |
-| JDK | 21 in CI (spec §9, P5 Q32) |
+| Pin | Rule | Recorded |
+|---|---|---|
+| Capacitor major | Pinned in `apps/android/package.json`, per spec §9 | `^8.5.0` |
+| AGP, Gradle wrapper, Kotlin plugin | Taken from that Capacitor version's template **unmodified** | AGP `8.13.0`; Gradle `8.14.3`; Kotlin `2.4.10` |
+| Android 16 API level | Read from the installed platform's `source.properties` | `36` |
+| `targetSdk` | **≥ the Android 16 API level.** Spec §2's entire argument is about Android 16 behaviour; a lower target opts out of it | `36` |
+| `compileSdk` | **`= targetSdk`** | `36` |
+| `minSdk` | **`max(the pinned Capacitor major's floor, 26)`.** HCE needs API 19, so Capacitor's floor is what actually binds; 26 is the sensible modern floor and picking it too low silently ships to devices nothing was tested on | `26` |
+| JDK | 21 in CI (spec §9, P5 Q32) | `21` |
+
+P5 Q9 layout: `flat (staged then re-synced)`.
 
 **The implementing task reads the template's actual values and writes them into
 this table**, together with the Android 16 API level it read from the SDK

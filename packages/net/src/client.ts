@@ -1,12 +1,15 @@
 import type { AuthEvent, Intent, KartState, RacePhase, SimContext, SimState, Vec3 } from '@tapkart/sim'
 import { MAX_ENTITIES, MAX_KARTS, allocStateLike, cloneState, createState, makeIntentBuffer, step, wrapAngle } from '@tapkart/sim'
 import type { ChannelName, InputDatagram, MessageKind, WireEntity, WireKart, WireSnapshot } from '@tapkart/protocol'
-import { EPS, INPUT_REDUNDANCY, decodeEvents, decodeInput, decodeSnapshot, encodeHeader, encodeInput } from '@tapkart/protocol'
+import { EPS, INPUT_REDUNDANCY, decodeCheckpoint, decodeEvents, decodeInput, decodeSnapshot, encodeHeader, encodeInput } from '@tapkart/protocol'
 import type { Transport } from './transport'
 import type { DatagramGuard } from './receive'
 import { TICK_MS } from './clock'
 import { applyEvent } from './apply'
 import { createDatagramGuard, eventCursorPlausible, tickCursorPlausible } from './receive'
+// No cycle: shadow.ts imports only ./transport, ./receive and ./apply from
+// within this package, and nothing at all from ./client.
+import { decodeAuthorityChange } from './shadow'
 
 /** 2.13s at 60Hz: >5x the 24-tick (400ms) worst-case round trip under this
  * plan's default lossy profile (150ms latency, 50ms jitter). See brief. */
@@ -17,7 +20,8 @@ const INPUT_SEND_INTERVAL_TICKS = 2
  * brief for the identical reasoning): an encoded input datagram is 8 small
  * intents plus the 2-byte message header, far under this. */
 const SEND_BUF_BYTES = 256
-/** No lobby/character-select wiring exists in this plan; see brief. */
+/** Constructor-only placeholder. beginRace replaces it from the start message
+ * before this loop is used as a live race. */
 const ZERO_CHARACTER_IDX = [0, 0, 0, 0, 0, 0, 0, 0]
 
 /**
@@ -252,12 +256,21 @@ interface RingEntry {
   appliedEvents: AuthEvent[]
 }
 
+/** decodeAuthorityChange RETURNS its result while DatagramGuard.decode takes a
+ * `(buf, out) => void`. One holder, allocated once, bridges the two without
+ * allocating per datagram. */
+interface AuthorityChangeHolder { value: { tick: number; eventSeq: number } | null }
+
+const intoAuthorityChange = (buf: Uint8Array, out: AuthorityChangeHolder): void => {
+  out.value = decodeAuthorityChange(buf)
+}
+
 /**
  * The client's prediction and reconciliation loop. Only the local kart
- * (`playerId`) is ever predicted; the other seven seats are driven by the
- * sim's own bot AI (never trusted, never rendered) because step() has no
- * partial-seat entry point. Remote karts and entities are rendered from
- * RemoteInterpolator (below), which onMessage feeds from the live snapshot
+ * (`playerId`) is trusted from this simulation. step() has no partial-seat
+ * entry point, so remote bot seats run bot AI and remote human seats consume
+ * neutral inputs; neither is rendered. Remote karts and entities are rendered
+ * from RemoteInterpolator (below), which onMessage feeds from the live snapshot
  * stream and remoteInterpolatorOf exposes.
  */
 export class ClientLoop {
@@ -353,6 +366,19 @@ export class ClientLoop {
 
   private correctionCount = 0
   private readonly correctionDelta: CorrectionDelta = { applied: false, x: 0, y: 0, z: 0, heading: 0 }
+  /** decodeCheckpoint writes its destination field by field and THROWS part-way
+   * through a truncated buffer, so a checkpoint is decoded here and committed
+   * into `predicted` only once the decode returned. receive.ts's own rule:
+   * "decode into a scratch buffer, then commit". */
+  private readonly checkpointScratch: SimState
+  private readonly authorityHolder: AuthorityChangeHolder = { value: null }
+  /** The datagram currently being dispatched, header included. The guard hands
+   * handlers the BODY; decodeAuthorityChange validates the header it skips and
+   * therefore needs the whole datagram. Set for the duration of one synchronous
+   * callback and cleared after it - never retained. */
+  private rawDatagram: Uint8Array | null = null
+  private hardResyncCount = 0
+  private readonly hardResyncCbs: ((tick: number) => void)[] = []
   private readonly remoteInterp = new RemoteInterpolator()
   /** Retained so the two body decodes below run under the drop counter: the
    * guard covers decode CALLS, not handler bodies (item G). */
@@ -383,6 +409,7 @@ export class ClientLoop {
     this.scratch = allocStateLike(this.ctx, this.predicted)
     this.resyncBase = allocStateLike(this.ctx, this.predicted)
     this.replayScratch = allocStateLike(this.ctx, this.predicted)
+    this.checkpointScratch = allocStateLike(this.ctx, this.predicted)
     this.replayInputs = makeIntentBuffer()
     this.stepInputs = makeIntentBuffer()
 
@@ -407,9 +434,17 @@ export class ClientLoop {
     this.decodeTarget = this.decodeScratchA
 
     this.guard = createDatagramGuard(this)
-    t.onMessage(this.guard.wrap((_peerId, channel, kind, payload) => {
+    const guarded = this.guard.wrap((_peerId, channel, kind, payload) => {
       this.onDatagram(channel, kind, payload)
-    }))
+    })
+    t.onMessage((peerId, channel, data) => {
+      this.rawDatagram = data
+      try {
+        guarded(peerId, channel, data)
+      } finally {
+        this.rawDatagram = null
+      }
+    })
     remoteInterpolators.set(this, this.remoteInterp)
     correctionDeltas.set(this, this.correctionDelta)
   }
@@ -510,11 +545,43 @@ export class ClientLoop {
         this.pendingAppliedEvents.push(ev)
       }
     }
-    // Every other kind - checkpoint, authorityChange, the lobby kinds - has no
-    // handler in this plan (contract §3 defines no codec for the lobby kinds,
-    // and client-side authority migration is a later plan's scope, spec §5's
-    // "clients swap transports"). A known kind this loop does not implement yet
-    // is simply ignored.
+    if (kind === 'checkpoint' && channel === 'reliable') {
+      // Full-precision truth. Through the guard, into a scratch state: a
+      // truncated checkpoint is a datagram that never arrived, and decoding
+      // straight into `predicted` would leave this client half-way between two
+      // timelines (decodeCheckpoint throws on an itemBoxes length mismatch,
+      // checkpoint.ts, and past the end of a short buffer).
+      if (!this.guard.decode(decodeCheckpoint, payload, this.checkpointScratch)) return
+      cloneState(this.checkpointScratch, this.predicted)
+      // Everything buffered against the old timeline is worthless: the ring
+      // holds checkpoints of ticks this state has just replaced, and a pending
+      // snapshot describes a timeline this client no longer has.
+      this.ringNewestTick = -1
+      this.ringCount = 0
+      this.pendingAppliedEvents.length = 0
+      this.pendingSnapshot = null
+      this.highestSeenSnapshotTick = this.predicted.tick
+      return
+    }
+    if (kind === 'authorityChange' && channel === 'reliable') {
+      const raw = this.rawDatagram
+      if (raw === null) return
+      if (!this.guard.decode(intoAuthorityChange, raw, this.authorityHolder)) return
+      const msg = this.authorityHolder.value
+      if (msg === null) return
+      // NOT a reset and NOT a ring clear: spec §5 is explicit that "there is no
+      // rewind", because the shadow has been ticking all along. The only state
+      // change is the event counter, so the promoted authority's first event is
+      // not rejected as a duplicate by applyEvent's
+      // `ev.eventSeq < state.nextEventSeq` guard - which would be silent on
+      // every client at once.
+      if (msg.eventSeq > this.predicted.nextEventSeq) this.predicted.nextEventSeq = msg.eventSeq
+      return
+    }
+    // Every other kind - the lobby kinds, ping and pong - belongs to RoomClient,
+    // which subscribes to the same transport (Transport.onMessage APPENDS,
+    // contract §2.1 rule 1). A known kind this loop does not implement is simply
+    // ignored.
     //
     // A datagram with an UNKNOWN tag, a mismatched protocol version, or a body
     // this loop cannot decode never reaches this method at all: the guard in
@@ -683,10 +750,72 @@ export class ClientLoop {
     }
   }
 
-  /** Count of corrections since construction. The zero-corrections test's
-   * primary instrument - see brief. */
+  /** Count of corrections since construction or the most recent beginRace.
+   * The zero-corrections test's primary instrument - see brief. */
   corrections(): number {
     return this.correctionCount
+  }
+
+  /**
+   * The `start` message, applied. Rebuilds `predicted` as
+   * createState(ctx, seed, characterIdx) and applies `humanMask` to isBot and
+   * connected, replacing the constructor's seed-0 / all-zero-characterIdx
+   * placeholder - which exists only because Plan 2 had no `start` message to be
+   * told any of this by.
+   *
+   * The PHASE IS LEFT at createState's 'countdown', so the 180-tick freeze runs
+   * locally: countdown is free, because everyone who calls createState with the
+   * same seed and the same seat map is aligned for the first 180 ticks whatever
+   * the network does.
+   *
+   * humanMask, exactly: bit i set means seat i is a connected human. Every clear
+   * bit is a bot. If the host, the shadow and a client disagree by one bit, one
+   * kart is driven by bot AI on one machine and by a player on another, and the
+   * only symptom is that reconciliation never converges for that seat.
+   */
+  beginRace(seed: number, characterIdx: number[], humanMask: number): void {
+    const fresh = createState(this.ctx, seed, characterIdx)
+    cloneState(fresh, this.predicted)
+    for (let i = 0; i < MAX_KARTS; i++) {
+      const human = ((humanMask >>> i) & 1) === 1
+      this.predicted.karts[i].isBot = !human
+      this.predicted.karts[i].connected = human
+    }
+    // This loop's own seat is never bot-driven in its own prediction:
+    // resolveInputs routes a !connected kart through bot AI, so a client whose
+    // own bit were clear would predict a kart that ignores every input it
+    // produces. The server always sets it; this is the belt, and it matches what
+    // the constructor already does.
+    this.predicted.karts[this.playerId].isBot = false
+    this.predicted.karts[this.playerId].connected = true
+
+    // Every banked tick, every pending correction and every latched button
+    // belongs to a race that is over. BOTH ring cursors, and
+    // highestSeenSnapshotTick too: leaving that at the old race's value makes
+    // every snapshot of the new one look stale and silently discards the lot.
+    this.ringNewestTick = -1
+    this.ringCount = 0
+    this.pendingAppliedEvents.length = 0
+    this.pendingSnapshot = null
+    this.highestSeenSnapshotTick = -1
+    this.correctionCount = 0
+    this.correctionDelta.applied = false
+    this.hardResyncCount = 0
+    this.latchedBrake = false
+    this.latchedDrift = false
+    this.latchedUseItem = false
+  }
+
+  /** Fires when reconciliation could not find `snap.tick` in the ring and had to
+   * hardResync. Appends, like every other listener registration in this package. */
+  onHardResync(cb: (tick: number) => void): void {
+    this.hardResyncCbs.push(cb)
+  }
+
+  /** Count of hard resyncs since construction (or since the last beginRace), for
+   * contract §6.4's repeated-divergence rule. */
+  hardResyncs(): number {
+    return this.hardResyncCount
   }
 
   /** The live predicted state, not a copy (locked contract §5: "read-only
@@ -759,10 +888,9 @@ export class ClientLoop {
   /**
    * Degraded-mode fallback for a ring that does not (or no longer) hold
    * `snap.tick` - in practice, only reachable if the ring capacity (128
-   * ticks, 2.13s) is exceeded by an extreme stall, since normal reconnection
-   * and late-join both need an AuthorityCheckpoint this task does not
-   * implement (out of scope - see Task 16). This at least fixes the one
-   * thing it can without one: the local kart's own fields, directly, with a
+   * ticks, 2.13s) is exceeded by an extreme stall or a snapshot arrives before
+   * the reliable checkpoint requested for recovery. This at least fixes the one
+   * thing a snapshot can: the local kart's own fields, directly, with a
    * visible discontinuity accepted as the cost of not silently staying wrong
    * forever. Every other kart and every entity in `predicted` is unaffected -
    * neither is ever read for anything.
@@ -793,6 +921,13 @@ export class ClientLoop {
     // slot whose tick happens to fall back inside a later window.
     this.ringNewestTick = -1
     this.ringCount = 0
+    this.hardResyncCount++
+    // Fired after the rebase, so a listener reading state() sees the timeline it
+    // is being told about. The consumer calls RoomClient.requestResync
+    // ('divergence', tick) when this crosses HARD_RESYNC_LIMIT within
+    // HARD_RESYNC_WINDOW_TICKS; this loop never sends, because it holds the RACE
+    // transport and the request goes over the CONTROL transport.
+    for (const cb of this.hardResyncCbs) cb(snap.tick)
   }
 
   /** The banked entry for `tick`, or null if the ring's window no longer covers
@@ -807,12 +942,9 @@ export class ClientLoop {
 }
 
 /**
- * Per-instance access to a ClientLoop's RemoteInterpolator without adding a fifth
- * member to the locked four-member class (contract §5 fixes ClientLoop's shape
- * exactly: constructor, tick, corrections, state - "no task may... add fields to
- * anything below"). A free function reading a WeakMap is the same "define what you
- * need in your own files" allowance this task already used for RemoteInterpolator
- * itself; it adds nothing to ClientLoop's own public surface.
+ * Per-instance access to a ClientLoop's RemoteInterpolator. This remains a free
+ * function after Plan 4 adds the race-control members: rendering state is a
+ * separate concern and does not need another method on the prediction loop.
  */
 const remoteInterpolators = new WeakMap<ClientLoop, RemoteInterpolator>()
 
@@ -841,8 +973,8 @@ const correctionDeltas = new WeakMap<ClientLoop, CorrectionDelta>()
  * to [-PI, PI]) as the return value. Returns null if the most recent tick()
  * applied no correction.
  *
- * A free function for the same reason remoteInterpolatorOf is one: ClientLoop's
- * four-member shape is locked by contract §5.
+ * A free function for the same reason remoteInterpolatorOf is one: render-only
+ * correction state stays outside the prediction loop's public methods.
  *
  * Error smoothing in the render layer is a REQUIREMENT, not a polish item, and
  * this is the only input it can have. Measured against a real AuthorityLoop at
@@ -876,15 +1008,12 @@ export function correctionDeltaOf(client: ClientLoop, outPos: Vec3): number | nu
 // Remote karts and all world entities are never predicted (spec section 5):
 // buffered and rendered ~100ms in the past with interpolation, extrapolating
 // briefly with a hard cap when the buffer starves. The class itself is
-// standalone on purpose - nothing in ClientLoop's locked four-member shape
-// can surface interpolated remote samples to a renderer (state() exposes the
+// standalone on purpose: state() exposes the
 // PREDICTED SimState, whose remote seats are exactly the locally-simulated
-// values spec section 5 says never to render), and this task will not add a
-// fifth member to a locked class. Its INPUT is wired, though: onMessage's
+// values spec section 5 says never to render. Its INPUT is wired, though: onMessage's
 // 'snapshot' branch above pushes every accepted snapshot in here, and
-// remoteInterpolatorOf (just above) is the free-function accessor a later
-// plan's renderer reads from. That renderer, and the OUTPUT half of wiring
-// this to an actual scene graph, remains a later plan's job.
+// remoteInterpolatorOf (just above) is the free-function accessor the game
+// renderer reads from.
 
 /** Spec section 5: "approximately 100ms in the past." Exact here. */
 export const REMOTE_INTERP_DELAY_MS = 100

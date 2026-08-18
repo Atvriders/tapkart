@@ -4,29 +4,13 @@ import type { ControlAdapter, ControlInputs, Viewport } from './types'
 import type { ControlConfig, Rect } from './config'
 import {
   THUMBZONE_FULL_LOCK_FRACTION,
-  TOUCH_BUTTON_GAP_PX,
-  TOUCH_BUTTON_SIZE_PX,
+  brakeButtonRect,
   driftButtonRect,
+  gasButtonRect,
   itemButtonRect,
   rectContains,
+  steeringZoneRect,
 } from './config'
-
-/**
- * Gas: one column left of the drift button, same row. Not exported - only this
- * scheme has pedals, and §5.5 exports rects only for the two buttons thumbZones and
- * tilt share. Derived from the same constants, so the cluster cannot disagree with
- * the shared layout by a pixel.
- */
-function gasButtonRect(v: Viewport, out: Rect): void {
-  driftButtonRect(v, out)
-  out.x -= TOUCH_BUTTON_GAP_PX + TOUCH_BUTTON_SIZE_PX
-}
-
-/** Brake: one column left of the item button, same row. */
-function brakeButtonRect(v: Viewport, out: Rect): void {
-  itemButtonRect(v, out)
-  out.x -= TOUCH_BUTTON_GAP_PX + TOUCH_BUTTON_SIZE_PX
-}
 
 /**
  * Virtual stick + pedals (spec §6: "most control, most screen occlusion").
@@ -43,6 +27,7 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
   const itemRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const gasRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const brakeRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const steeringRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
 
   let stickId = -1
   let gasId = -1
@@ -68,6 +53,7 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
       itemButtonRect(raw.viewport, itemRect)
       gasButtonRect(raw.viewport, gasRect)
       brakeButtonRect(raw.viewport, brakeRect)
+      steeringZoneRect(raw.viewport, steeringRect)
 
       let itemPulse = false
 
@@ -85,7 +71,7 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
             if (gasId === -1) gasId = p.id
           } else if (rectContains(brakeRect, p.x, p.y)) {
             if (brakeId === -1) brakeId = p.id
-          } else if (stickId === -1 && p.x < raw.viewport.width * 0.5) {
+          } else if (stickId === -1 && rectContains(steeringRect, p.x, p.y)) {
             stickId = p.id
             originX = p.x
             currentX = p.x

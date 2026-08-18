@@ -39,10 +39,11 @@ describe('@tapkart/render package.json', () => {
     expect(manifest.devDependencies?.three).toBeUndefined()
   })
 
-  it('exports the barrel and the three adapter subpath, and nothing else', () => {
-    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './three'])
+  it('exports the barrel and the two adapter subpaths, and nothing else', () => {
+    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './three', './web-audio'])
     expect(manifest.exports['.']).toBe('./src/index.ts')
     expect(manifest.exports['./three']).toBe('./src/three/renderer.ts')
+    expect(manifest.exports['./web-audio']).toBe('./src/audio/web.ts')
   })
 
   it('depends on sim and content by workspace wildcard', () => {

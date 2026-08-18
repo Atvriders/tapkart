@@ -7,6 +7,9 @@ import {
   createState,
   statesEqual,
 } from '@tapkart/sim'
+import { encodeHeader, encodeSnapshot } from '@tapkart/protocol'
+import type { ChannelName } from '@tapkart/protocol'
+import type { Transport } from '@tapkart/net'
 import {
   createNullTransport,
   makeRemoteEntitySample,
@@ -20,6 +23,36 @@ import { createSession } from '../src/session'
 import { makeGameContext, makeSessionPair } from './fixtures/game-fixtures'
 
 const CHARACTER_IDX = [3, 5, 1, 7, 2, 6, 0, 4]
+
+interface DeliverTransport extends Transport {
+  deliver(channel: ChannelName, data: Uint8Array): void
+}
+
+function makeDeliverTransport(): DeliverTransport {
+  const callbacks: Array<(peerId: string, channel: ChannelName, data: Uint8Array) => void> = []
+  return {
+    send: () => {},
+    broadcast: () => {},
+    onMessage: (cb) => { callbacks.push(cb) },
+    onPeerLost: () => {},
+    peers: () => ['authority'],
+    close: () => {},
+    deliver(channel, data): void {
+      for (const cb of callbacks) cb('authority', channel, data)
+    },
+  }
+}
+
+function snapshotDatagram(state: SimState): Uint8Array {
+  const buffer = new Uint8Array(1024)
+  const header = encodeHeader(buffer, 'snapshot')
+  const body = encodeSnapshot(
+    buffer.subarray(header),
+    state,
+    new Array<number>(MAX_KARTS).fill(state.tick),
+  )
+  return buffer.slice(0, header + body)
+}
 
 function intent(steer: number, accel: number): Intent {
   return { tick: 0, steer, accel, brake: false, drift: false, useItem: false }
@@ -49,6 +82,55 @@ function driveSolo(steer: number, accel: number, ticks: number): { x: number; z:
 }
 
 describe('createSession — construction and validation', () => {
+  it('starts a guest from the server seed, characters and exact human mask', () => {
+    const humanMask = 0b1000_0101
+    const session = createSession({
+      role: 'guest',
+      ctx: makeGameContext(false),
+      localPlayerId: 2,
+      seed: 0x1234,
+      characterIdx: CHARACTER_IDX.slice(),
+      humanMask,
+      transport: createNullTransport(),
+    })
+    const expected = createState(makeGameContext(false), 0x1234, CHARACTER_IDX)
+    for (let i = 0; i < MAX_KARTS; i++) {
+      const human = ((humanMask >>> i) & 1) === 1
+      expected.karts[i].isBot = !human
+      expected.karts[i].connected = human
+    }
+    expect(statesEqual(session.state(), expected)).toBe(true)
+    session.close()
+  })
+
+  it('gives host and guest the same human/bot seat map', () => {
+    const humanMask = 0b1010_0101
+    const host = createSession({
+      role: 'host',
+      ctx: makeGameContext(true),
+      localPlayerId: 0,
+      seed: 9,
+      characterIdx: CHARACTER_IDX.slice(),
+      humanMask,
+      transport: withLocalInput(createNullTransport()),
+    })
+    const guest = createSession({
+      role: 'guest',
+      ctx: makeGameContext(false),
+      localPlayerId: 2,
+      seed: 9,
+      characterIdx: CHARACTER_IDX.slice(),
+      humanMask,
+      transport: createNullTransport(),
+    })
+    for (let i = 0; i < MAX_KARTS; i++) {
+      expect(guest.state().karts[i].isBot).toBe(host.state().karts[i].isBot)
+      expect(guest.state().karts[i].connected).toBe(host.state().karts[i].connected)
+    }
+    host.close()
+    guest.close()
+  })
+
   it('starts host and solo in countdown, with raceStartTick = COUNTDOWN_TICKS (R44)', () => {
     const solo = makeSolo()
     const host = createSession({
@@ -232,6 +314,34 @@ describe('the two RaceViews the audio delta needs', () => {
 })
 
 describe('guest-only surfaces', () => {
+  it('delegates hard-resync callbacks and count from ClientLoop', () => {
+    const transport = makeDeliverTransport()
+    const session = createSession({
+      role: 'guest',
+      ctx: makeGameContext(false),
+      localPlayerId: 1,
+      seed: 7,
+      characterIdx: CHARACTER_IDX.slice(),
+      humanMask: 0b11,
+      transport,
+    })
+    const a: number[] = []
+    const b: number[] = []
+    session.onHardResync((tick) => a.push(tick))
+    session.onHardResync((tick) => b.push(tick))
+
+    const authority = createState(makeGameContext(true), 7, CHARACTER_IDX)
+    authority.tick = 4321
+    authority.phase = 'racing'
+    transport.deliver('unreliable', snapshotDatagram(authority))
+    session.tickOnce(intent(0, 1))
+
+    expect(a).toEqual([4321])
+    expect(b).toEqual([4321])
+    expect(session.hardResyncs()).toBe(1)
+    session.close()
+  })
+
   it('samples remote seats from the interpolator and never the local one', () => {
     const pair = makeSessionPair()
     const it = intent(0.2, 1)

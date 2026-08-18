@@ -7,9 +7,12 @@ import {
   TOUCH_BUTTON_GAP_PX,
   THUMBZONE_FULL_LOCK_FRACTION,
   BRAKE_HOLD_TICKS,
+  brakeButtonRect,
   driftButtonRect,
+  gasButtonRect,
   itemButtonRect,
   rectContains,
+  steeringZoneRect,
 } from '../src/controls/config'
 import type { Rect } from '../src/controls/config'
 import { makeControlInputsFixture } from './fixtures/game-fixtures'
@@ -112,6 +115,21 @@ describe('controls/config layout (Q24)', () => {
     driftButtonRect(VIEWPORT, drift)
     expect(drift.y - (r.y + r.h)).toBe(TOUCH_BUTTON_GAP_PX)
     expect(r.x).toBe(drift.x)
+  })
+
+  it('defines the exact steering surface and virtual-stick pedal cluster', () => {
+    const steering = newRect()
+    const gas = newRect()
+    const brake = newRect()
+    steeringZoneRect(VIEWPORT, steering)
+    gasButtonRect(VIEWPORT, gas)
+    brakeButtonRect(VIEWPORT, brake)
+
+    expect(steering).toEqual({ x: 0, y: 0, w: 400, h: 400 })
+    expect(gas).toEqual({ x: 592, y: 296, w: 88, h: 88 })
+    expect(brake).toEqual({ x: 592, y: 192, w: 88, h: 88 })
+    expect(rectContains(steering, 399.999, 200)).toBe(true)
+    expect(rectContains(steering, 400, 200)).toBe(false)
   })
 
   it('writes into the caller-owned Rect and allocates nothing', () => {

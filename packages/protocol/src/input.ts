@@ -69,3 +69,20 @@ export function decodeInput(buf: Uint8Array, out: InputDatagram): void {
     intent.useItem = r.readBits(1) !== 0
   }
 }
+
+/**
+ * The seat an input datagram CLAIMS, read without decoding it.
+ *
+ * Contract §2.10 G4. `buf` is the WHOLE datagram, header included - unlike
+ * `decodeInput`, which takes the body. This fixed-offset read is total and
+ * allocation-free because encodeInput writes playerId first and BitWriter is
+ * LSB-first within each byte.
+ *
+ * -1 for a buffer too short to hold those bits. Never 0 on a short buffer:
+ * seat 0 is the host's, and truncated input must not become a claim on it.
+ */
+export function playerIdOfInput(buf: Uint8Array): number {
+  const HEADER_BYTES = 2
+  if (buf.length < HEADER_BYTES + 1) return -1
+  return buf[HEADER_BYTES] & ((1 << PLAYER_ID_BITS) - 1)
+}

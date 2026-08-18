@@ -17,6 +17,19 @@ import type {
   EpsilonTable,
   QuantField,
   QuantTable,
+  // lobby [Plan 4]
+  ClientUpdateMessage,
+  HelloMessage,
+  JoinResult,
+  LobbyMessage,
+  PeerRole,
+  ResyncReason,
+  ResyncRequestMessage,
+  StartMessage,
+  WelcomeMessage,
+  WireLobbySlot,
+  // control [Plan 4 Task 6]
+  HeartbeatMessage,
 } from '../src/index'
 import {
   BitWriter,
@@ -43,11 +56,14 @@ import { normalizeRoomCode as normalizeRoomCodeDirect } from '../src/room'
 // it would report "no clashes" precisely when there is one.
 import * as bitsNs from '../src/bits'
 import * as checkpointNs from '../src/checkpoint'
+import * as controlNs from '../src/control'
 import * as eventsNs from '../src/events'
 import * as inputNs from '../src/input'
+import * as lobbyNs from '../src/lobby'
 import * as quantNs from '../src/quant'
 import * as roomNs from '../src/room'
 import * as snapshotNs from '../src/snapshot'
+import * as stringsNs from '../src/strings'
 import * as typesNs from '../src/types'
 
 const HERE = dirname(fileURLToPath(import.meta.url)) // packages/protocol/test
@@ -73,17 +89,37 @@ const SRC = join(HERE, '..', 'src')
 const SURFACE: Record<string, string[]> = {
   // [Task 3]
   types: ['PROTOCOL_VERSION', 'WIRE_TAG', 'decodeHeader', 'encodeHeader'],
-  // [Task 15c] the room-code family: lobby URLs and the NFC tap payload
+  // [Task 15c] the room-code family: lobby URLs and the NFC tap payload.
+  // [Plan 4] plus the bit-level half and the session token (§3.2).
   room: [
+    'CODE_CHAR_BITS',
     'LOBBY_PATH_PREFIX',
     'ROOM_CODE_ALPHABET',
+    'ROOM_CODE_BITS',
     'ROOM_CODE_LENGTH',
+    'ROOM_CODE_SPACE',
+    'SESSION_TOKEN_BITS',
+    'SESSION_TOKEN_LENGTH',
+    'decodeCodeChars',
+    'encodeCodeChars',
     'isValidRoomCode',
+    'isValidSessionToken',
     'lobbyPathFor',
     'normalizeRoomCode',
   ],
   // [Task 4]
   bits: ['BitReader', 'BitWriter'],
+  // [Plan 4] length-prefixed UTF-8: the only strings on this wire, and the
+  // sole owner of the truncation rule every *_MAX_BYTES depends on.
+  strings: [
+    'NAME_LEN_BITS',
+    'NAME_MAX_BYTES',
+    'TRACK_ID_LEN_BITS',
+    'TRACK_ID_MAX_BYTES',
+    'readString',
+    'utf8Truncate',
+    'writeString',
+  ],
   // [Task 5]
   quant: ['EPS', 'Q', 'WORLD_HALF', 'quantStep'],
   // [Task 6]
@@ -93,21 +129,61 @@ const SURFACE: Record<string, string[]> = {
   // [Task 9]
   events: ['decodeEvents', 'encodeEvents'],
   // [Task 10]
-  input: ['INPUT_REDUNDANCY', 'decodeInput', 'encodeInput'],
+  input: ['INPUT_REDUNDANCY', 'decodeInput', 'encodeInput', 'playerIdOfInput'],
+  // [Plan 4] the six lobby kinds. Ten flag constants, twelve codecs, six
+  // derived body sizes.
+  lobby: [
+    'CLIENT_FLAG_READY',
+    'CLIENT_FLAG_RTC_CONNECTED',
+    'CLIENT_FLAG_RTC_FAILED',
+    'CLIENT_FLAG_START_REQUEST',
+    'CLIENT_FLAG_WEBRTC',
+    'CLIENT_UPDATE_MAX_BYTES',
+    'HELLO_MAX_BYTES',
+    'LOBBY_MAX_BYTES',
+    'RESYNC_REQUEST_BYTES',
+    'SERVER_FLAG_CHECKPOINT_NEXT',
+    'SERVER_FLAG_IS_HOST',
+    'SERVER_FLAG_RACE_IN_PROGRESS',
+    'SERVER_FLAG_RELAY_ASSIGNED',
+    'SERVER_FLAG_RELAY_FIRST',
+    'START_MAX_BYTES',
+    'WELCOME_MAX_BYTES',
+    'decodeClientUpdate',
+    'decodeHello',
+    'decodeLobby',
+    'decodeResyncRequest',
+    'decodeStart',
+    'decodeWelcome',
+    'encodeClientUpdate',
+    'encodeHello',
+    'encodeLobby',
+    'encodeResyncRequest',
+    'encodeStart',
+    'encodeWelcome',
+  ],
+  // [Plan 4 Task 6] ping and pong, one codec
+  control: ['HEARTBEAT_BYTES', 'decodeHeartbeat', 'encodeHeartbeat'],
 }
 
 /** The barrel's `export *` lines, in the order src/index.ts lists them. */
-const BARREL_MODULES = ['types', 'room', 'bits', 'quant', 'snapshot', 'checkpoint', 'events', 'input']
+const BARREL_MODULES = [
+  'types', 'room', 'bits', 'strings', 'quant', 'snapshot', 'checkpoint', 'events', 'input', 'lobby',
+  'control',
+]
 
 const NAMESPACES: [string, object][] = [
   ['types', typesNs],
   ['room', roomNs],
   ['bits', bitsNs],
+  ['strings', stringsNs],
   ['quant', quantNs],
   ['snapshot', snapshotNs],
   ['checkpoint', checkpointNs],
   ['events', eventsNs],
   ['input', inputNs],
+  ['lobby', lobbyNs],
+  ['control', controlNs],
 ]
 
 /**
@@ -133,6 +209,17 @@ interface ProtocolTypeSurface {
   QuantField: QuantField
   QuantTable: QuantTable
   EpsilonTable: EpsilonTable
+  PeerRole: PeerRole
+  JoinResult: JoinResult
+  ResyncReason: ResyncReason
+  HelloMessage: HelloMessage
+  ClientUpdateMessage: ClientUpdateMessage
+  WelcomeMessage: WelcomeMessage
+  WireLobbySlot: WireLobbySlot
+  LobbyMessage: LobbyMessage
+  StartMessage: StartMessage
+  ResyncRequestMessage: ResyncRequestMessage
+  HeartbeatMessage: HeartbeatMessage
 }
 const TYPE_SURFACE: Record<keyof ProtocolTypeSurface, true> = {
   ChannelName: true,
@@ -145,6 +232,17 @@ const TYPE_SURFACE: Record<keyof ProtocolTypeSurface, true> = {
   QuantField: true,
   QuantTable: true,
   EpsilonTable: true,
+  PeerRole: true,
+  JoinResult: true,
+  ResyncReason: true,
+  HelloMessage: true,
+  ClientUpdateMessage: true,
+  WelcomeMessage: true,
+  WireLobbySlot: true,
+  LobbyMessage: true,
+  StartMessage: true,
+  ResyncRequestMessage: true,
+  HeartbeatMessage: true,
 }
 
 const expectedNames = (): string[] => Object.values(SURFACE).flat().sort()
@@ -206,8 +304,10 @@ describe('@tapkart/protocol barrel', () => {
     // only proves the pin is reachable and non-empty rather than a dead
     // declaration the compiler skipped.
     expect(Object.keys(TYPE_SURFACE).sort()).toEqual([
-      'ChannelName', 'EpsilonTable', 'InputDatagram', 'MessageKind', 'QuantField',
-      'QuantTable', 'WireEntity', 'WireHeader', 'WireKart', 'WireSnapshot',
+      'ChannelName', 'ClientUpdateMessage', 'EpsilonTable', 'HeartbeatMessage', 'HelloMessage', 'InputDatagram',
+      'JoinResult', 'LobbyMessage', 'MessageKind', 'PeerRole', 'QuantField', 'QuantTable',
+      'ResyncReason', 'ResyncRequestMessage', 'StartMessage', 'WelcomeMessage', 'WireEntity',
+      'WireHeader', 'WireKart', 'WireLobbySlot', 'WireSnapshot',
     ])
   })
 
@@ -218,7 +318,7 @@ describe('@tapkart/protocol barrel', () => {
   })
 
   it('carries the contract constants through unchanged', () => {
-    expect(PROTOCOL_VERSION).toBe(1)
+    expect(PROTOCOL_VERSION).toBe(2)
     expect(INPUT_REDUNDANCY).toBe(8)
     // Every net loop dispatches on these, so a barrel forwarding a stale copy
     // would desynchronise host, client and shadow with no other symptom. All
