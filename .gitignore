@@ -30,3 +30,6 @@ apps/web/dist/
 apps/web/.vite/
 apps/web/public/icons/
 packages/server/dist/
+
+# Codex worktrees: local scratch checkouts, never repository content.
+.codex/
