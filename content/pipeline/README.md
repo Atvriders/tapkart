@@ -82,9 +82,15 @@ never rewritten.**
 `content-bundle.mjs` is `packages/content/src/descriptors.ts` and `theme.ts` bundled by
 esbuild, so a generated record is judged by the code the game runs. The gate adds the layer
 a per-record parser cannot: id uniqueness, slot-letter ordering, silhouette-vs-weight
-agreement, kart colour separation and edge-marker legibility — all of which need the whole
-roster at once. `packages/content/test/roster.test.ts` re-asserts every one of them against
-the committed files, so the invariants survive a hand edit.
+agreement and colour separation across the roster — all of which need the whole roster at
+once. `packages/content/test/roster.test.ts` re-asserts every one of them against the
+committed files, so the invariants survive a hand edit.
+
+Edge-marker and road-versus-ground legibility used to be on that list. They are
+`parseTrackTheme`'s rules now, checked on one record at a time, because a threshold that
+lives only in this script binds generated content and nothing else — a hand-edited theme
+file went to the renderer unmeasured. The gate no longer restates them; it gets them by
+calling the parser.
 
 Keep `descriptor-gen-instruction.md` **byte-identical** across runs; per-record detail goes
 in the JSONL body. Balance is not generated: the eight stat rows come from `makeCharacters()`

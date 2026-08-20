@@ -107,6 +107,22 @@ function readNumber(
   return raw
 }
 
+/**
+ * The raw value of a numeric field when it IS a number, ignoring its range.
+ *
+ * Cross-field rules use this rather than `readNumber`'s return, and they gain and lose
+ * by it deliberately. A field that is out of range is still a real number, so the pair
+ * rule below can be shown to fire — gated on the ranges, `wheelWidth < chassisWidth / 2`
+ * would be unreachable code, because wheelWidth maxes at 0.35 and half the narrowest
+ * legal chassis is 0.45. A field that is a string or NaN has no value to compare, and
+ * comparing `readNumber`'s 0 stand-in would report a second failure about a number the
+ * record never contained.
+ */
+function rawNumber(rec: Record<string, unknown>, key: string): number | null {
+  const raw = rec[key]
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
+}
+
 function readPalette(
   paletteRec: Record<string, unknown> | null,
   key: string,
@@ -234,6 +250,36 @@ export function parseKartDescriptor(json: unknown): KartDescriptor {
   const chassisHeight = readNumber(rec, KART_RANGES[2], issues)
   const wheelRadius = readNumber(rec, KART_RANGES[3], issues)
   const wheelWidth = readNumber(rec, KART_RANGES[4], issues)
+
+  // Cross-field geometry. Every field above can sit inside its own range while the
+  // combination is not a kart: nothing in a per-field range stops a 0.90 m wheel being
+  // bolted to a 1.40 m chassis, and the renderer is then handed overlapping solids. This
+  // is the descriptor-shaped version of the defect `glacier-pass` shipped with — an
+  // 8.4 m hairpin under a 21 m road, every field legal, the drivable surface folded —
+  // which `validateTrack` missed for exactly this reason: nothing compared two fields.
+  //
+  // Both rules hold for all eight shipped karts with margin (the tightest is 0.27 m).
+  const chassisLengthRaw = rawNumber(rec, 'chassisLength')
+  const chassisWidthRaw = rawNumber(rec, 'chassisWidth')
+  const wheelRadiusRaw = rawNumber(rec, 'wheelRadius')
+  const wheelWidthRaw = rawNumber(rec, 'wheelWidth')
+
+  if (wheelWidthRaw !== null && chassisWidthRaw !== null && !(wheelWidthRaw < chassisWidthRaw / 2)) {
+    issues.push(
+      `wheelWidth ${wheelWidthRaw} must be less than half of chassisWidth ${chassisWidthRaw} ` +
+        `(${chassisWidthRaw / 2}), because a left and a right wheel both sit inside that width`,
+    )
+  }
+  if (
+    wheelRadiusRaw !== null &&
+    chassisLengthRaw !== null &&
+    !(2 * wheelRadiusRaw <= chassisLengthRaw / 2)
+  ) {
+    issues.push(
+      `wheelRadius ${wheelRadiusRaw} means a ${2 * wheelRadiusRaw} wheel diameter, which must be ` +
+        `at most half of chassisLength ${chassisLengthRaw} (${chassisLengthRaw / 2})`,
+    )
+  }
 
   const paletteRec = readPaletteRecord(rec, KART_PALETTE_KEYS, issues)
   const body = readPalette(paletteRec, 'body', issues)

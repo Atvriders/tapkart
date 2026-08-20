@@ -90,9 +90,15 @@ describe('parseTrackTheme', () => {
           spacing: 4,
           height: 0.3,
           offset: 0,
+          // 0 and 1 are still both exercised as palette components — by `road`, `wall`
+          // and `fog.color` above and by the white marker here. The dark marker is 0.64
+          // rather than 0 because a black marker on this black road is the legibility
+          // violation the parser now rejects, and this case is about the RANGE bounds:
+          // if it kept painting black on black it would be asserting two rules at once
+          // and failing for the wrong one.
           colors: [
-            [0, 0, 0],
             [1, 1, 1],
+            [0.64, 0.64, 0.64],
           ],
         },
       }),
@@ -392,6 +398,210 @@ describe('parseTrackTheme rejections', () => {
     expect(message).toContain('ambient: must be within 0..1, got 4')
     expect(message).toContain('; ')
     expect(message.startsWith('parseTrackTheme: ')).toBe(true)
+  })
+})
+
+/**
+ * Legibility (Q20) — the cross-field rule no per-field range can state. Every theme in
+ * this section has every field inside its declared range; what is wrong is the
+ * COMBINATION, and until the rule moved into the parser a black-on-black theme parsed
+ * clean. The thresholds and the distance below are the ones
+ * `content/pipeline/gate-descriptors.mjs` used to apply — after parsing, when content is
+ * GENERATED — so a hand-edited theme file, or any other caller of the parser, was never
+ * measured at all. The gate no longer states them a second time; it gets them by calling
+ * this parser, which is the only way the two cannot disagree.
+ *
+ * Distances are quoted as literals, not recomputed: a test that recomputes the number
+ * with the parser's own formula agrees with the parser however wrong both are.
+ */
+describe('parseTrackTheme legibility', () => {
+  /** [v, v, v] — a grey whose perceptual coordinate is sqrt(v) in all three channels. */
+  const grey = (v: number): number[] => [v, v, v]
+
+  /** The fixture's edge markers with the two colours replaced. */
+  const markers = (a: readonly number[], b: readonly number[]): Record<string, unknown> => ({
+    spacing: 14,
+    height: 0.9,
+    offset: 0.7,
+    colors: [a, b],
+  })
+
+  function messageOf(json: unknown): string {
+    try {
+      parseTrackTheme(json)
+    } catch (e) {
+      return (e as Error).message
+    }
+    throw new Error('the parser accepted a theme this case exists to reject')
+  }
+
+  /** The silence guard: every schema field the case did not make illegible must be
+   *  ABSENT from the message. A parser that answers any violation by reciting the whole
+   *  schema — every field, every bound, every current value — satisfies a quoted-rule
+   *  assertion completely, and this is the only thing it cannot do. */
+  function expectNamesOnly(message: string, allowed: readonly string[]): void {
+    for (const key of TOP_LEVEL_KEYS) {
+      if (allowed.includes(key)) continue
+      expect(message, `${key} is named by a theme that did not get it wrong`).not.toMatch(
+        new RegExp(`\\b${key}\\b`),
+      )
+    }
+  }
+
+  // Each row: in range everywhere, illegible in exactly one way, and allowed to name
+  // exactly the fields that way involves.
+  const ILLEGIBLE: ReadonlyArray<{
+    what: string
+    over: RawTheme
+    expected: string
+    names: readonly string[]
+  }> = [
+    {
+      // sqrt coords 0.95 and 0.81 — 0.14 apart per channel, 0.242 in three.
+      what: 'two marker colours a driver cannot tell apart, so the posts give no cadence',
+      over: { edgeMarkers: markers(grey(0.9025), grey(0.6561)) },
+      expected:
+        'edgeMarkers.colors: the two marker colours must be at least 0.25 apart in perceptual distance to alternate visibly, got 0.242',
+      names: ['edgeMarkers'],
+    },
+    {
+      // Marker sqrt 0.61 against a road at sqrt 0.5: 0.191, just under the 0.2 floor.
+      what: 'the first marker vanishing into the road',
+      over: { road: grey(0.25), edgeMarkers: markers(grey(0.3721), [0.9, 0.88, 0.84]) },
+      expected:
+        'edgeMarkers.colors[0]: must be at least 0.2 from road in perceptual distance, got 0.191',
+      names: ['edgeMarkers', 'road'],
+    },
+    {
+      // The SECOND marker, against the OTHER surface: a parser that checks colors[0]
+      // against road only passes every other row here and fails this one.
+      what: 'the second marker vanishing into the ground',
+      over: {
+        road: grey(0.02),
+        ground: grey(0.25),
+        edgeMarkers: markers([0.9, 0.88, 0.84], grey(0.3721)),
+      },
+      expected:
+        'edgeMarkers.colors[1]: must be at least 0.2 from ground in perceptual distance, got 0.191',
+      names: ['edgeMarkers', 'ground'],
+    },
+    {
+      // sqrt 0.55 and 0.5: 0.087, just under the 0.1 floor.
+      what: 'a road the same colour as what is beside it',
+      over: { road: grey(0.3025), ground: grey(0.25) },
+      expected: 'road: must be at least 0.1 from ground in perceptual distance, got 0.087',
+      names: ['road', 'ground'],
+    },
+  ]
+
+  it('covers the marker pair, both markers, both surfaces and the road', () => {
+    // A truncated table is the silent way a suite stops testing what it claims to.
+    expect(ILLEGIBLE).toHaveLength(4)
+  })
+
+  for (const c of ILLEGIBLE) {
+    it(`rejects ${c.what}`, () => {
+      const json = rawTheme(c.over)
+      expect(() => parseTrackTheme(json)).toThrow(c.expected)
+      expect(() => parseTrackTheme(json)).toThrow(/^parseTrackTheme: /)
+      // Nothing here is out of range or unknown; if either rule fires, the case is not
+      // testing what its name says.
+      expect(() => parseTrackTheme(json)).not.toThrow(/unknown key/)
+      expect(() => parseTrackTheme(json)).not.toThrow(/must be within/)
+      const message = messageOf(json)
+      expectNamesOnly(message, c.names)
+      expect(message.split('; ')).toHaveLength(1)
+    })
+  }
+
+  it('rejects a black-on-black theme, naming all six ways it is invisible', () => {
+    // The positive control. Every field is in range — black is a legal palette component
+    // and every number below is legal — so range checking alone accepts this theme and
+    // renders a track no player can see.
+    const black = [0, 0, 0]
+    const message = messageOf(
+      rawTheme({ road: black, ground: black, edgeMarkers: markers(black, black) }),
+    )
+    expect(message).toContain(
+      'edgeMarkers.colors: the two marker colours must be at least 0.25 apart in perceptual distance to alternate visibly, got 0.000',
+    )
+    expect(message).toContain('edgeMarkers.colors[0]: must be at least 0.2 from road in perceptual distance, got 0.000')
+    expect(message).toContain('edgeMarkers.colors[0]: must be at least 0.2 from ground in perceptual distance, got 0.000')
+    expect(message).toContain('edgeMarkers.colors[1]: must be at least 0.2 from road in perceptual distance, got 0.000')
+    expect(message).toContain('edgeMarkers.colors[1]: must be at least 0.2 from ground in perceptual distance, got 0.000')
+    expect(message).toContain('road: must be at least 0.1 from ground in perceptual distance, got 0.000')
+    // Every violation collected into one message, as everywhere else in this parser.
+    expect(message.split('; ')).toHaveLength(6)
+  })
+
+  it('rejects a pale road on a white ground that a LINEAR distance would accept', () => {
+    // The measurement has to happen in a perceptual space, and this is the half of that
+    // claim a dark palette cannot make. Linear light SPREADS bright colours: these two
+    // are 0.102 apart in linear RGB — above the 0.1 floor — while the eye sees 0.052.
+    const road = grey(0.9409) // sqrt 0.97
+    const ground = [1, 1, 1]
+    expect(colorDistance(road, ground)).toBeGreaterThan(0.1)
+    const json = rawTheme({
+      road,
+      ground,
+      // Dark markers, so the only rule that fires is the one under test.
+      edgeMarkers: markers([0.02, 0.02, 0.02], [0.5, 0.05, 0.05]),
+    })
+    const message = messageOf(json)
+    expect(message).toContain('road: must be at least 0.1 from ground in perceptual distance, got 0.052')
+    expectNamesOnly(message, ['road', 'ground'])
+  })
+
+  it("accepts caldera's shipped palette, which a LINEAR distance would reject", () => {
+    // The other half, and the reason the sqrt is not decoration: linear light CRUSHES
+    // dark colours together. These are content/themes/caldera.json's own road and ground,
+    // 0.071 apart in linear RGB — under the floor — and 0.146 apart to the eye. A parser
+    // that compared linear values would refuse to load a track that ships today.
+    const road = [0.03, 0.03, 0.038]
+    const ground = [0.1, 0.038, 0.03]
+    expect(colorDistance(road, ground)).toBeLessThan(0.1)
+    const theme = parseTrackTheme(
+      rawTheme({ road, ground, edgeMarkers: markers([1, 0.85, 0.05], [0.05, 0.08, 0.42]) }),
+    )
+    expect(theme.road).toEqual(road)
+    expect(theme.ground).toEqual(ground)
+  })
+
+  it('accepts a theme just the legible side of each threshold', () => {
+    // One notch out from each rejection above: 0.260 against the 0.25 marker pair floor,
+    // 0.208 against the 0.2 marker-versus-surface floor, 0.104 against the 0.1 road floor.
+    // A parser holding content to a stricter threshold than the gate did fails here, and
+    // one holding it to a looser threshold fails the rejections above.
+    expect(() => parseTrackTheme(rawTheme({ edgeMarkers: markers(grey(0.9025), grey(0.64)) }))).not.toThrow()
+    expect(() =>
+      parseTrackTheme(
+        rawTheme({ road: grey(0.25), edgeMarkers: markers(grey(0.3844), [0.9, 0.88, 0.84]) }),
+      ),
+    ).not.toThrow()
+    expect(() => parseTrackTheme(rawTheme({ road: grey(0.3136), ground: grey(0.25) }))).not.toThrow()
+  })
+
+  it('says nothing about legibility when the colour it would measure never parsed', () => {
+    // A road with a NaN component has no colour to measure, and `palette()` substitutes 0
+    // for the component it rejected. Measuring that would report a second failure about a
+    // number the file does not contain — and would name `ground`, which is fine.
+    const message = messageOf(rawTheme({ road: [Number.NaN, 0.15, 0.15] }))
+    expect(message).toContain('road[0]: must be a finite number, got NaN')
+    expect(message).not.toContain('perceptual distance')
+    expect(message.split('; ')).toHaveLength(1)
+  })
+
+  it('holds every shipped theme, and the fallback, to the same rule', () => {
+    // The rule is only worth having if the content it ships with passes it. Reparsing
+    // DEFAULT_TRACK_THEME is the case that would otherwise rot: it is the theme every
+    // unthemed track renders from and it is written in code, where no gate ever sees it.
+    expect(() => parseTrackTheme(structuredClone(DEFAULT_TRACK_THEME))).not.toThrow()
+    for (const id of ['caldera', 'dust-canyon', 'glacier-pass', 'harbor-run', 'neon-district', 'redwood-rise']) {
+      const raw: unknown = JSON.parse(
+        readFileSync(new URL(`../../../content/themes/${id}.json`, import.meta.url), 'utf8'),
+      )
+      expect(() => parseTrackTheme(raw), `${id} is not legible under its own rule`).not.toThrow()
+    }
   })
 })
 

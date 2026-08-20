@@ -53,7 +53,13 @@ function visualDistance(a: PaletteRGB, b: PaletteRGB): number {
   return Math.hypot(d0, d1, d2)
 }
 
-/** The same thresholds `gate-descriptors.mjs` applies before a record is accepted. */
+/** The thresholds the shipped roster is held to. The three per-theme ones are
+ *  `parseTrackTheme`'s — the module-scope parse above would have thrown before any test
+ *  ran if a shipped theme broke one — and they are restated here, with an independently
+ *  written `visualDistance`, deliberately: this file measures the COMMITTED FILES, so it
+ *  still fails if a hand edit walks a palette to the far side of a threshold the parser
+ *  was loosened past. The last two are roster-scope, and `gate-descriptors.mjs` is the
+ *  only other place that states them, because no per-record parser can see them. */
 const MIN_MARKER_PAIR = 0.25
 const MIN_MARKER_SURFACE = 0.2
 const MIN_ROAD_GROUND = 0.1
@@ -204,7 +210,9 @@ describe('themes', () => {
 
   it('keeps Q20 edge markers legible — the speed and corner cue', () => {
     // Q20: markers are gameplay. Two markers a player cannot tell apart give no cadence,
-    // and markers that vanish into the road or the ground give nothing at all.
+    // and markers that vanish into the road or the ground give nothing at all. The
+    // parser enforces this per record now; the assertions below are the same claim made
+    // against the files on disk with arithmetic of their own.
     for (const theme of themes) {
       const [a, b] = theme.edgeMarkers.colors
       expect(visualDistance(a, b), `${theme.trackId}: marker colours are too alike`).toBeGreaterThanOrEqual(

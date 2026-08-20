@@ -280,6 +280,140 @@ describe('parseKartDescriptor accepts a valid record', () => {
   })
 })
 
+/**
+ * Cross-field geometry: two rules that hold for all eight shipped karts and that no
+ * single range implies. Before them a record could sit inside every declared range and
+ * still describe a kart whose wheels do not fit the chassis they are bolted to — the
+ * same shape of defect as `glacier-pass`'s 8.4 m hairpin under a 21 m road, where every
+ * field was legal and the combination folded the drivable surface.
+ *
+ * Both rules are evaluated on any two FINITE numbers rather than only on two in-range
+ * ones, and the width rule is why. `wheelWidth` maxes at 0.35 while `chassisWidth`
+ * bottoms out at 0.9, so half the narrowest legal chassis is 0.45 and no record that
+ * passes both ranges can break the pair. Gated behind the ranges the rule would be
+ * unreachable code — a rule that cannot be shown to fire is a rule nobody can trust —
+ * so it fires on the out-of-range wheel below and it starts mattering the day either
+ * range moves.
+ */
+describe('parseKartDescriptor rejects a kart whose parts do not fit each other', () => {
+  // Every field a kart message may name, as the parser spells it. Anything outside the
+  // per-case allow-list must be ABSENT: a parser that answers any violation by reciting
+  // the whole schema satisfies a `toThrow(rule text)` table however precisely the text is
+  // quoted, and only silence about the fields this record got right can tell them apart.
+  const KART_FIELDS = [
+    'id',
+    'name',
+    'chassisLength',
+    'chassisWidth',
+    'chassisHeight',
+    'wheelRadius',
+    'wheelWidth',
+    'palette.body',
+    'palette.trim',
+    'palette.wheel',
+  ] as const
+
+  function messageOf(parse: () => unknown): string {
+    try {
+      parse()
+    } catch (err) {
+      return (err as Error).message
+    }
+    throw new Error('the parser accepted a record this case exists to reject')
+  }
+
+  function expectNamesOnly(message: string, allowed: readonly string[]): void {
+    for (const field of KART_FIELDS) {
+      if (allowed.includes(field)) continue
+      const token = field.replace('.', '\\.')
+      expect(message, `${field} is named by a record that did not get it wrong`).not.toMatch(
+        new RegExp(`\\b${token}\\b`),
+      )
+    }
+  }
+
+  it('rejects a wheel diameter longer than half the chassis, with both fields IN range', () => {
+    // wheelRadius 0.45 (its max) and chassisLength 1.4 (its min) are each perfectly
+    // legal; together they are a 0.90 m wheel on a chassis with 0.70 m to give it.
+    const parse = (): KartDescriptor =>
+      parseKartDescriptor(makeKartDescriptorJson({ chassisLength: 1.4, wheelRadius: 0.45 }))
+    expect(parse).toThrow(
+      'wheelRadius 0.45 means a 0.9 wheel diameter, which must be at most half of chassisLength 1.4 (0.7)',
+    )
+    expect(parse).toThrow(/^parseKartDescriptor: /)
+    // Neither field is outside its range, so no range rule may fire, and the record
+    // overwrites existing keys, so no unknown-key rule may either.
+    expect(parse).not.toThrow(/must be a finite number in/)
+    expect(parse).not.toThrow(/is not a field of this schema/)
+    const message = messageOf(parse)
+    expectNamesOnly(message, ['wheelRadius', 'chassisLength'])
+    expect(message.split('; ')).toHaveLength(1)
+  })
+
+  it('rejects a wheel wider than half the chassis', () => {
+    const parse = (): KartDescriptor =>
+      parseKartDescriptor(makeKartDescriptorJson({ chassisWidth: 0.9, wheelWidth: 0.5 }))
+    expect(parse).toThrow('wheelWidth 0.5 must be less than half of chassisWidth 0.9 (0.45)')
+    // The range rule fires as well — 0.5 is outside [0.1, 0.35] — and both statements are
+    // true of this record. Exactly two issues: the pair rule must not be reported twice,
+    // and no third field may be dragged in.
+    expect(parse).toThrow(rangeIssue('wheelWidth', 0.1, 0.35))
+    const message = messageOf(parse)
+    expectNamesOnly(message, ['wheelWidth', 'chassisWidth'])
+    expect(message.split('; ')).toHaveLength(2)
+  })
+
+  it('is strict on width and inclusive on length, which is what each rule says', () => {
+    // A `<`/`<=` slip in either direction is invisible to every other case in this file.
+    // Half of 0.9 is exactly 0.45, and `wheelWidth < chassisWidth / 2` excludes it.
+    expect(() => parseKartDescriptor(makeKartDescriptorJson({ chassisWidth: 0.9, wheelWidth: 0.45 })))
+      .toThrow('wheelWidth 0.45 must be less than half of chassisWidth 0.9 (0.45)')
+    // Half of 1.8 is exactly 0.9, and `2 * wheelRadius <= chassisLength / 2` admits it.
+    const exact = parseKartDescriptor(makeKartDescriptorJson({ chassisLength: 1.8, wheelRadius: 0.45 }))
+    expect(exact.wheelRadius).toBe(0.45)
+    // One hundredth of a metre shorter and the same wheel no longer fits.
+    expect(() => parseKartDescriptor(makeKartDescriptorJson({ chassisLength: 1.79, wheelRadius: 0.45 })))
+      .toThrow('must be at most half of chassisLength 1.79 (0.895)')
+  })
+
+  it('stays silent when the field it would compare against never parsed', () => {
+    // One problem, not two: a record whose chassisWidth is a string has nothing for the
+    // pair rule to compare against, and inventing a comparison would name a field whose
+    // real value the parser never read.
+    const parse = (): KartDescriptor =>
+      parseKartDescriptor(makeKartDescriptorJson({ chassisWidth: 'wide', wheelWidth: 0.5 }))
+    const message = messageOf(parse)
+    expect(message).toContain(rangeIssue('chassisWidth', 0.9, 1.6))
+    expect(message).toContain(rangeIssue('wheelWidth', 0.1, 0.35))
+    expect(message).not.toContain('must be less than half of')
+    expect(message.split('; ')).toHaveLength(2)
+  })
+
+  it('accepts the tightest wheel-to-chassis pairing both ranges allow', () => {
+    // The other direction, and the one that catches a mis-transcribed rule: a parser
+    // that divided chassisWidth by 4, or compared against chassisHeight, rejects this
+    // legal record and every rejection case above still passes.
+    const tight = parseKartDescriptor(
+      makeKartDescriptorJson({ chassisWidth: 0.9, wheelWidth: 0.35, chassisLength: 1.4, wheelRadius: 0.35 }),
+    )
+    expect(tight.wheelWidth).toBe(0.35)
+    expect(tight.wheelRadius).toBe(0.35)
+  })
+
+  it('accepts all eight shipped karts, which is the rule\'s other half', () => {
+    // If a shipped kart failed either rule the rule would be wrong, or the content would
+    // be — and this is where that argument has to be settled, not in a comment.
+    for (let i = 0; i < 8; i++) {
+      const json: unknown = JSON.parse(
+        readFileSync(new URL(`../../../content/karts/kart-${i}.json`, import.meta.url), 'utf8'),
+      )
+      const kart = parseKartDescriptor(json)
+      expect(kart.wheelWidth).toBeLessThan(kart.chassisWidth / 2)
+      expect(2 * kart.wheelRadius).toBeLessThanOrEqual(kart.chassisLength / 2)
+    }
+  })
+})
+
 // "Consumes: nothing" is a contract line with real consequences: this module has to
 // stay DOM-free, and the delegated batch's gate is built by esbuild-bundling these
 // two functions. Nothing else in the suite would notice an import appearing.

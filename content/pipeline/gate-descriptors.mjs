@@ -2,10 +2,16 @@
 // packages/content/src (bundled by esbuild in step 3.1, never reimplemented). A gate
 // that re-implements validation tests the gate.
 //
-// Two layers, and the second is the one a parser cannot do: per-record shape and range
-// via parseCharacterDescriptor / parseKartDescriptor / parseTrackTheme, then roster-wide
-// rules — uniqueness, ordering, slot agreement, and the legibility thresholds — which
+// Two layers, and the second is the one a parser cannot do: per-record shape, range and
+// legibility via parseCharacterDescriptor / parseKartDescriptor / parseTrackTheme, then
+// roster-wide rules — uniqueness, ordering, slot agreement and colour separation — which
 // need all 22 records at once.
+//
+// The per-theme legibility thresholds used to live here, applied after the parse. That
+// bound the generated batch and nothing else: a hand-edited theme file, or a theme from
+// any other source, reached the renderer unmeasured. They are `parseTrackTheme`'s now,
+// and this script does not restate them — it gets them by calling the parser, which is
+// the only arrangement in which the two cannot disagree.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 import {
@@ -29,17 +35,18 @@ const TRACK_IDS = [
   'redwood-rise',
 ]
 
-// The same thresholds packages/content/test/roster.test.ts asserts on the committed files.
-const MIN_MARKER_PAIR = 0.25
-const MIN_MARKER_SURFACE = 0.2
-const MIN_ROAD_GROUND = 0.1
+// Roster-scope only. A parser sees one record at a time and cannot compare two, so these
+// two thresholds are the ones that still belong here; the per-theme ones are in
+// packages/content/src/theme.ts. packages/content/test/roster.test.ts asserts both kinds
+// on the committed files.
 const MIN_KART_SEPARATION = 0.15
 const MIN_THEME_SEPARATION = 0.1
 
 const silhouetteFor = (w) => (w >= 1.1 ? 'wide' : w <= 0.9 ? 'compact' : 'tall')
 
 /** Linear light crushes dark colours together; the sqrt stands in for the display
- *  transfer function, so "different" means what the eye would call different. */
+ *  transfer function, so "different" means what the eye would call different. The same
+ *  space `parseTrackTheme` measures its per-record legibility in. */
 const visualDistance = (a, b) =>
   Math.hypot(
     Math.sqrt(a[0]) - Math.sqrt(b[0]),
@@ -151,20 +158,8 @@ for (const tid of TRACK_IDS) {
   }
   themes.push(t)
   if (t.trackId !== tid) fail.push(`theme-${tid}: trackId is '${t.trackId}'`)
-  const [a, b] = t.edgeMarkers.colors
-  if (visualDistance(a, b) < MIN_MARKER_PAIR) {
-    fail.push(`theme-${tid}: the two marker colours are too alike (${visualDistance(a, b).toFixed(3)})`)
-  }
-  for (const [name, surface] of [['road', t.road], ['ground', t.ground]]) {
-    for (const c of [a, b]) {
-      if (visualDistance(c, surface) < MIN_MARKER_SURFACE) {
-        fail.push(`theme-${tid}: a marker colour vanishes into ${name} (${visualDistance(c, surface).toFixed(3)})`)
-      }
-    }
-  }
-  if (visualDistance(t.road, t.ground) < MIN_ROAD_GROUND) {
-    fail.push(`theme-${tid}: road and ground are the same colour (${visualDistance(t.road, t.ground).toFixed(3)})`)
-  }
+  // Marker-pair, marker-vs-surface and road-vs-ground legibility already fired above, in
+  // parseTrackTheme, and a record that broke one of them never reached this loop.
 }
 
 for (let i = 0; i < themes.length; i++) {
