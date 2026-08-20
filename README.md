@@ -102,6 +102,13 @@ docker compose up -d
 curl --fail http://127.0.0.1:3031/healthz
 ```
 
+Compose pulls `latest`, which moves only for a `v*` release. **No release has
+been cut yet**, so until one is, run the current `master` build explicitly:
+
+```bash
+TAG=edge docker compose up -d
+```
+
 The public image is `ghcr.io/atvriders/tapkart`. `latest` moves only for a
 `v*` release tag; `edge` follows `master`; immutable `sha-<full-commit-sha>`
 tags identify exact builds. The release and edge images target `linux/amd64`

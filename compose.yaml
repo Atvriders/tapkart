@@ -1,6 +1,9 @@
 services:
   tapkart:
-    image: ghcr.io/atvriders/tapkart:latest
+    # `latest` moves only for a `v*` release, so it does not exist until this
+    # project cuts one. Until then, run the current master build:
+    #   TAG=edge docker compose up -d
+    image: ghcr.io/atvriders/tapkart:${TAG:-latest}
     restart: unless-stopped
     ports:
       - "${PORT:-3031}:${PORT:-3031}"

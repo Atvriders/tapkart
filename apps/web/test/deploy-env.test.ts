@@ -240,7 +240,18 @@ describe('the image is wired the way §11.1 fixes it', () => {
     }
   })
 
-  it('pulls latest, which F-P5-33 makes mean a release', () => {
-    expect(COMPOSE).toMatch(/image:\s*ghcr\.io\/atvriders\/tapkart:latest/)
+  /**
+   * F-P5-33 makes `latest` mean a release, so that is what compose must default
+   * to. The tag stays overridable because a release is the one thing this
+   * repository cannot produce for itself -- it needs the owner's signing
+   * keystore -- and until the first `v*` tag exists, an un-overridable `latest`
+   * makes the README's own quickstart fail on a manifest that was never
+   * published. The default is still `latest`, and is asserted as such: `edge`
+   * is what a self-hoster opts into, never what they get by accident.
+   */
+  it('defaults to latest and lets a self-hoster override the tag', () => {
+    const match = /image:\s*ghcr\.io\/atvriders\/tapkart:(\S+)/.exec(COMPOSE)
+    expect(match).not.toBeNull()
+    expect(match![1]).toBe('${TAG:-latest}')
   })
 })
