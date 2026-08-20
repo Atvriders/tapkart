@@ -155,6 +155,25 @@ including no trailing-slash redirect. Then complete the on-device checks in
 
 ## Build the Android app
 
+### Prebuilt APKs
+
+Two are published, and the difference between them is not cosmetic.
+
+The **debug APK** is attached to every successful `master` CI run as the
+`tapkart-debug-apk` artifact (Actions → the run → Artifacts). It installs and
+plays, and NFC, QR, and room-code joins all work. It is signed with Android's
+universal debug key, so App Links will **not** verify: a tapped invite opens
+the browser rather than the app. It is also built against this repository's
+reserved example origin, not a deployment.
+
+The **signed release APK** is attached to each GitHub Release, built by
+`release.yml` from a `v*` tag. That one is signed with the project keystore and
+compiled against the deployed origin, so invites route into the app. Producing
+it requires the owner's keystore secrets and the release repository variables —
+see [In CI](#in-ci).
+
+Build it yourself when you want a different origin:
+
 The Android project is a flat Capacitor workspace under `apps/android`. Its APK
 bundles `apps/web/dist`; it never loads the game from a remote WebView. Build the
 web assets with the same HTTPS origin Gradle will compile into both App Links

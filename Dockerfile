@@ -1,7 +1,19 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------- build stage
-FROM node:22-alpine AS build
+# Pinned to the BUILDER's architecture, not the target's. Everything this stage
+# hands to the runtime stage is portable: a bundled ESM server, a bundled ESM
+# assetlinks tool, and static web assets. None of it is architecture-specific,
+# so building it once natively and copying it into both legs is not an
+# optimisation that trades away correctness -- the bytes are identical either
+# way.
+#
+# Without this, buildx runs the whole npm workspace build under QEMU for the
+# arm64 leg. Measured on this repository: over ninety minutes, versus a few
+# minutes native, for byte-identical output. The runtime stage below is
+# deliberately NOT pinned -- that is where the per-architecture `node` binary
+# comes from, and pinning it would produce an amd64 image wearing an arm64 tag.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /src
 
 COPY . .

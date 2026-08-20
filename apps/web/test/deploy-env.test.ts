@@ -157,7 +157,7 @@ describe('L3: no TAPKART_ variable reaches a server that would reject it', () =>
 
 describe('the image is wired the way §11.1 fixes it', () => {
   it('uses Node 22, builds in order, and sets an absolute STATIC_ROOT', () => {
-    expect(DOCKERFILE.match(/^FROM node:22-alpine/gm)).toHaveLength(2)
+    expect(DOCKERFILE.match(/^FROM (?:--platform=\$BUILDPLATFORM )?node:22-alpine/gm)).toHaveLength(2)
     const install = DOCKERFILE.indexOf('RUN npm ci')
     const web = DOCKERFILE.indexOf('RUN npm run build -w @tapkart/web')
     const server = DOCKERFILE.indexOf('RUN npm run build -w @tapkart/server')
@@ -198,6 +198,46 @@ describe('the image is wired the way §11.1 fixes it', () => {
 
   it('does not advertise disabling the required v1 shadow authority', () => {
     expect(COMPOSE).not.toMatch(/^\s*#\s*SHADOW_ENABLED\s*:/m)
+  })
+
+  /**
+   * The build stage is pinned to the BUILDER's architecture and the runtime
+   * stage is not, and the asymmetry is the whole point.
+   *
+   * Pin neither, and buildx runs the entire npm workspace build under QEMU to
+   * produce the arm64 leg. That is not hypothetical: this repository's first
+   * multi-architecture build spent over ninety minutes emulating a build whose
+   * every output -- bundled ESM and static assets -- is byte-identical across
+   * architectures.
+   *
+   * Pin BOTH, and the failure is silent and much worse: the runtime stage is
+   * where the per-architecture `node` binary comes from, so an amd64 runtime
+   * would be published under the arm64 tag and every arm64 host would pull an
+   * image that cannot exec its own entrypoint. Nothing in CI would notice,
+   * because CI is amd64.
+   */
+  it('builds on the builder architecture and runs on the target one', () => {
+    const stages = [...DOCKERFILE.matchAll(/^FROM\s+(.*?)\s+AS\s+(\w+)\s*$/gm)]
+    expect(stages.map((m) => m[2])).toEqual(['build', 'runtime'])
+    const [build, runtime] = stages
+    expect(build[1]).toContain('--platform=$BUILDPLATFORM')
+    expect(runtime[1]).not.toContain('--platform')
+  })
+
+  /**
+   * The corollary the pin depends on: nothing architecture-specific may be
+   * carried out of the build stage. Every `COPY --from=build` must name
+   * bundled JavaScript or static assets. The moment someone copies out
+   * `node_modules` -- which holds native `.node` binaries for the BUILDER --
+   * the pin above starts shipping amd64 code inside the arm64 image.
+   */
+  it('carries nothing architecture-specific out of the build stage', () => {
+    const copies = [...DOCKERFILE.matchAll(/^COPY --from=build\s+(?:--chown=\S+\s+)?(\S+)/gm)]
+    expect(copies.length).toBeGreaterThan(0)
+    for (const [, source] of copies) {
+      expect(source, `${source} is copied out of the build stage`).not.toMatch(/node_modules/)
+      expect(source).toMatch(/\.mjs$|\/dist$/)
+    }
   })
 
   it('pulls latest, which F-P5-33 makes mean a release', () => {

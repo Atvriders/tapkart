@@ -82,6 +82,19 @@ jobs:
       - run: node apps/android/scripts/assert-manifest.mjs debug
       - run: bash apps/android/scripts/assert-pins.sh
       - run: bash apps/android/scripts/assert-signing.sh
+      # The debug APK, published so every master build has an installable
+      # artifact. It is signed with Android's universal debug key, NOT the
+      # release keystore: App Links will therefore NOT verify against a
+      # deployed origin, and an invite tapped on a phone opens the browser
+      # rather than the app. That is a property of the signing key, not a bug
+      # to chase. The signed, verifying APK comes from release.yml on a `v*`
+      # tag, and requires the owner's keystore secrets.
+      - name: publish the debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tapkart-debug-apk
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
 
   e2e:
     runs-on: ubuntu-latest
