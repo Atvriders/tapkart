@@ -997,3 +997,29 @@ Ruling P3-R65 (cross-field constraints now bind at load, not only at generation)
   Note the honest disclosure: `wheelWidth < chassisWidth / 2` is UNREACHABLE from in-range values
   (max wheelWidth 0.35 < min chassisWidth/2 = 0.45), so it is evaluated on any two finite numbers
   rather than gated behind the ranges — gated, it would be untestable code.
+
+Ruling P3-R61 CLOSED. Kart-to-kart contact is audible, with no change to sim, the wire format or
+  RaceView — derived entirely from the same two-view delta every other cue uses.
+  THE DISCRIMINATOR IS PHYSICS, NOT A THRESHOLD, which is what makes it trustworthy: a pair fires
+  only when neither kart is motion-locked, they are within 2.5 m, and BOTH gain >= 0.9 m/s along
+  the line between them and AWAY from each other. That last clause is the one a wall cannot fake —
+  every shared effect (boost pad, ramp, kerb) moves both karts the SAME way, and one shared
+  direction projects onto the line between them with OPPOSITE signs.
+  Constants measured rather than chosen: 2.5 m from a measured worst-case 2.265 m on a true-contact
+  frame over 24,000 ticks of eight-kart racing closing at 41.8 m/s; the 0.9 m/s floor sits just
+  above brakeRate * TICK_DT = 0.800, measured exactly at 0.800 in the worst non-contact arrangement
+  (two karts 2.45 m apart, facing, both braking).
+  FALSE POSITIVES PROVED SILENT, and the strongest is the ramp: two karts landing side by side take
+  a 7 m/s discontinuity on the SAME frame at 2.3 m apart, and stay silent because the signs agree.
+  Double respawn nose-to-nose shows 29.4 m/s of apparent mutual push and is stopped only by the
+  motion-lock gate. Also proved silent: boost pad side by side, off-track scrape with brake held,
+  nose-to-nose braking without contact, and two spin-out cases arming the sign and range gates.
+  Honestly disclosed rather than buried: 54 of 55 contacts heard over 36,000 ticks (the miss a
+  1.90 m/s graze), two double-fires, and catch-up frames spanning two ticks double the brake budget
+  to 1.6 m/s — 6 such frames in 24,000 ticks, all adjacent to real contacts.
+
+Ruling P3-R66 (the agent's concern (a), ruled). MAX_AUDIO_CUES STAYS 16 and pair cues stay last.
+  Widening it would require rewriting the overflow test that currently proves the cap works by
+  offering 24 cues against a 16 cap. The planner starts at most 4 one-shots a frame, so the cap is
+  nowhere near binding, and weakening a test that passes for the right reason to accommodate a
+  hypothetical pile-up is the wrong trade. Revisit only with evidence of a real dropped contact cue.
