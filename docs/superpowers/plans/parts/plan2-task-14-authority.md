@@ -412,7 +412,7 @@ Expected: FAIL. `packages/net/src/authority.ts` does not exist yet:
 
 ```
 Error: Cannot find module '../src/authority' imported from
-'/home/kasm-user/tapkart/packages/net/test/authority.test.ts'
+'<repo>/packages/net/test/authority.test.ts'
 Caused by: Error: Failed to load url ../src/authority (resolved id:
 ../src/authority) in .../authority.test.ts. Does the file exist?
 

@@ -670,7 +670,7 @@ Run: `npx vitest run packages/render/test/audio.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/audio (resolved id: /home/kasm-user/tapkart/packages/render/src/audio) in /home/kasm-user/tapkart/packages/render/test/audio.test.ts. Does the file exist?
+Error: Failed to load url ../src/audio (resolved id: <repo>/packages/render/src/audio) in <repo>/packages/render/test/audio.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**

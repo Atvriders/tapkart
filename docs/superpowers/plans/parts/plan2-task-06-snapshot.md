@@ -691,7 +691,7 @@ Run: `npx vitest run packages/protocol/test/snapshot.test.ts`
 
 Expected: FAIL — suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/snapshot' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/snapshot.test.ts'`. Zero tests
+'<repo>/packages/protocol/test/snapshot.test.ts'`. Zero tests
 collected (`src/snapshot.ts` does not exist yet).
 
 - [ ] **Step 3: Write `encodeSnapshot` and `decodeSnapshot`**

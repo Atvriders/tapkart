@@ -513,7 +513,7 @@ file fails to load (no individual test runs):
 
 ```
 Error: Cannot find module '../src/apply' imported from
-'/home/kasm-user/tapkart/packages/net/test/apply.test.ts'
+'<repo>/packages/net/test/apply.test.ts'
   ...
 Caused by: Error: Failed to load url ../src/apply (resolved id: ../src/apply)
 in .../packages/net/test/apply.test.ts. Does the file exist?

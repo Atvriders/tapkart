@@ -207,7 +207,7 @@ Run: `npx vitest run packages/protocol/test/bits.test.ts`
 
 Expected: FAIL — the suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/bits' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/bits.test.ts'`. Zero tests collected
+'<repo>/packages/protocol/test/bits.test.ts'`. Zero tests collected
 (`src/bits.ts` does not exist yet).
 
 - [ ] **Step 3: Write the minimal `BitWriter`/`BitReader` — `writeBits`/`readBits` only**

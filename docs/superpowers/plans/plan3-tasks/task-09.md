@@ -358,7 +358,7 @@ describe('buildKartMesh', () => {
 Run: `npx vitest run packages/render/test/descriptors.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/descriptors' imported from '/home/kasm-user/tapkart/packages/render/test/descriptors.test.ts'`
+`Error: Cannot find module '../src/descriptors' imported from '<repo>/packages/render/test/descriptors.test.ts'`
 (caused by `Failed to load url ../src/descriptors ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**

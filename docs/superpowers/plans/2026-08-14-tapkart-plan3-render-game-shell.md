@@ -4726,9 +4726,9 @@ describe('render fixtures', () => {
 Run: `npx vitest run packages/render/test`
 
 Expected: FAIL. Both files fail to collect, with
-`Error: Cannot find module '../src/types' imported from '/home/kasm-user/tapkart/packages/render/test/types.test.ts'`
+`Error: Cannot find module '../src/types' imported from '<repo>/packages/render/test/types.test.ts'`
 (caused by `Failed to load url ../src/types ... Does the file exist?`) and
-`Error: Cannot find module './fixtures/render-fixtures' imported from '/home/kasm-user/tapkart/packages/render/test/fixtures.test.ts'`.
+`Error: Cannot find module './fixtures/render-fixtures' imported from '<repo>/packages/render/test/fixtures.test.ts'`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -6020,7 +6020,7 @@ describe('meshCounts', () => {
 Run: `npx vitest run packages/render/test/mesh.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/mesh' imported from '/home/kasm-user/tapkart/packages/render/test/mesh.test.ts'`
+`Error: Cannot find module '../src/mesh' imported from '<repo>/packages/render/test/mesh.test.ts'`
 (caused by `Failed to load url ../src/mesh ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**
@@ -7076,7 +7076,7 @@ describe('buildKartMesh', () => {
 Run: `npx vitest run packages/render/test/descriptors.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/descriptors' imported from '/home/kasm-user/tapkart/packages/render/test/descriptors.test.ts'`
+`Error: Cannot find module '../src/descriptors' imported from '<repo>/packages/render/test/descriptors.test.ts'`
 (caused by `Failed to load url ../src/descriptors ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**
@@ -7876,7 +7876,7 @@ describe('updateCamera', () => {
 Run: `npx vitest run packages/render/test/camera.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/camera' imported from '/home/kasm-user/tapkart/packages/render/test/camera.test.ts'`
+`Error: Cannot find module '../src/camera' imported from '<repo>/packages/render/test/camera.test.ts'`
 (caused by `Failed to load url ../src/camera ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**
@@ -8491,7 +8491,7 @@ Run: `npx vitest run packages/render/test/frame-core.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/frame (resolved id: /home/kasm-user/tapkart/packages/render/src/frame) in /home/kasm-user/tapkart/packages/render/test/frame-core.test.ts. Does the file exist?
+Error: Failed to load url ../src/frame (resolved id: <repo>/packages/render/src/frame) in <repo>/packages/render/test/frame-core.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**
@@ -9487,7 +9487,7 @@ Run: `npx vitest run packages/render/test/frame-build.test.ts`
 Expected: FAIL — `frame.ts` exists (Task 11) but exports no `buildRenderFrame`:
 
 ```
-SyntaxError: The requested module '/home/kasm-user/tapkart/packages/render/src/frame.ts' does not provide an export named 'buildRenderFrame'
+SyntaxError: The requested module '<repo>/packages/render/src/frame.ts' does not provide an export named 'buildRenderFrame'
 ```
 
 - [ ] **Step 3: Write the implementation**
@@ -10208,7 +10208,7 @@ Run: `npx vitest run packages/render/test/hud.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/hud (resolved id: /home/kasm-user/tapkart/packages/render/src/hud) in /home/kasm-user/tapkart/packages/render/test/hud.test.ts. Does the file exist?
+Error: Failed to load url ../src/hud (resolved id: <repo>/packages/render/src/hud) in <repo>/packages/render/test/hud.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**
@@ -11081,7 +11081,7 @@ Run: `npx vitest run packages/render/test/audio.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/audio (resolved id: /home/kasm-user/tapkart/packages/render/src/audio) in /home/kasm-user/tapkart/packages/render/test/audio.test.ts. Does the file exist?
+Error: Failed to load url ../src/audio (resolved id: <repo>/packages/render/src/audio) in <repo>/packages/render/test/audio.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**

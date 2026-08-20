@@ -773,7 +773,7 @@ describe('meshCounts', () => {
 Run: `npx vitest run packages/render/test/mesh.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/mesh' imported from '/home/kasm-user/tapkart/packages/render/test/mesh.test.ts'`
+`Error: Cannot find module '../src/mesh' imported from '<repo>/packages/render/test/mesh.test.ts'`
 (caused by `Failed to load url ../src/mesh ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**

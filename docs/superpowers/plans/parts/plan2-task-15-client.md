@@ -397,7 +397,7 @@ Expected: FAIL. `packages/net/src/client.ts` does not exist yet:
 
 ```
 Error: Cannot find module '../src/client' imported from
-'/home/kasm-user/tapkart/packages/net/test/client.test.ts'
+'<repo>/packages/net/test/client.test.ts'
 Caused by: Error: Failed to load url ../src/client (resolved id: ../src/client)
 in .../client.test.ts. Does the file exist?
 

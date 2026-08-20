@@ -514,7 +514,7 @@ Run: `npx vitest run packages/render/test/hud.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/hud (resolved id: /home/kasm-user/tapkart/packages/render/src/hud) in /home/kasm-user/tapkart/packages/render/test/hud.test.ts. Does the file exist?
+Error: Failed to load url ../src/hud (resolved id: <repo>/packages/render/src/hud) in <repo>/packages/render/test/hud.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**

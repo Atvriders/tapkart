@@ -169,7 +169,7 @@ Run: `npx vitest run packages/protocol/test/quant.test.ts`
 
 Expected: FAIL — suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/quant' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/quant.test.ts'`. Zero tests collected
+'<repo>/packages/protocol/test/quant.test.ts'`. Zero tests collected
 (`src/quant.ts` does not exist yet).
 
 - [ ] **Step 3: Write `WORLD_HALF` and `quantStep`**

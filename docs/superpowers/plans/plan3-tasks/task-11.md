@@ -443,7 +443,7 @@ Run: `npx vitest run packages/render/test/frame-core.test.ts`
 Expected: FAIL — the module under test does not exist yet:
 
 ```
-Error: Failed to load url ../src/frame (resolved id: /home/kasm-user/tapkart/packages/render/src/frame) in /home/kasm-user/tapkart/packages/render/test/frame-core.test.ts. Does the file exist?
+Error: Failed to load url ../src/frame (resolved id: <repo>/packages/render/src/frame) in <repo>/packages/render/test/frame-core.test.ts. Does the file exist?
 ```
 
 - [ ] **Step 3: Write the implementation**

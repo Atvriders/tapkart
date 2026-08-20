@@ -411,9 +411,9 @@ describe('render fixtures', () => {
 Run: `npx vitest run packages/render/test`
 
 Expected: FAIL. Both files fail to collect, with
-`Error: Cannot find module '../src/types' imported from '/home/kasm-user/tapkart/packages/render/test/types.test.ts'`
+`Error: Cannot find module '../src/types' imported from '<repo>/packages/render/test/types.test.ts'`
 (caused by `Failed to load url ../src/types ... Does the file exist?`) and
-`Error: Cannot find module './fixtures/render-fixtures' imported from '/home/kasm-user/tapkart/packages/render/test/fixtures.test.ts'`.
+`Error: Cannot find module './fixtures/render-fixtures' imported from '<repo>/packages/render/test/fixtures.test.ts'`.
 
 - [ ] **Step 3: Write the implementation**
 

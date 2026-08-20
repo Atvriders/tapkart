@@ -774,7 +774,7 @@ Run: `npx vitest run packages/render/test/frame-build.test.ts`
 Expected: FAIL — `frame.ts` exists (Task 11) but exports no `buildRenderFrame`:
 
 ```
-SyntaxError: The requested module '/home/kasm-user/tapkart/packages/render/src/frame.ts' does not provide an export named 'buildRenderFrame'
+SyntaxError: The requested module '<repo>/packages/render/src/frame.ts' does not provide an export named 'buildRenderFrame'
 ```
 
 - [ ] **Step 3: Write the implementation**

@@ -356,7 +356,7 @@ describe('updateCamera', () => {
 Run: `npx vitest run packages/render/test/camera.test.ts`
 
 Expected: FAIL to collect, with
-`Error: Cannot find module '../src/camera' imported from '/home/kasm-user/tapkart/packages/render/test/camera.test.ts'`
+`Error: Cannot find module '../src/camera' imported from '<repo>/packages/render/test/camera.test.ts'`
 (caused by `Failed to load url ../src/camera ... Does the file exist?`).
 
 - [ ] **Step 3: Write the implementation**

@@ -4313,7 +4313,7 @@ Run: `npx vitest run packages/protocol/test/bits.test.ts`
 
 Expected: FAIL — the suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/bits' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/bits.test.ts'`. Zero tests collected
+'<repo>/packages/protocol/test/bits.test.ts'`. Zero tests collected
 (`src/bits.ts` does not exist yet).
 
 - [ ] **Step 3: Write the minimal `BitWriter`/`BitReader` — `writeBits`/`readBits` only**
@@ -4799,7 +4799,7 @@ Run: `npx vitest run packages/protocol/test/quant.test.ts`
 
 Expected: FAIL — suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/quant' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/quant.test.ts'`. Zero tests collected
+'<repo>/packages/protocol/test/quant.test.ts'`. Zero tests collected
 (`src/quant.ts` does not exist yet).
 
 - [ ] **Step 3: Write `WORLD_HALF` and `quantStep`**
@@ -5772,7 +5772,7 @@ Run: `npx vitest run packages/protocol/test/snapshot.test.ts`
 
 Expected: FAIL — suite fails to load, under "Failed Suites":
 `Error: Cannot find module '../src/snapshot' imported from
-'/home/kasm-user/tapkart/packages/protocol/test/snapshot.test.ts'`. Zero tests
+'<repo>/packages/protocol/test/snapshot.test.ts'`. Zero tests
 collected (`src/snapshot.ts` does not exist yet).
 
 - [ ] **Step 3: Write `encodeSnapshot` and `decodeSnapshot`**
@@ -9595,7 +9595,7 @@ file fails to load (no individual test runs):
 
 ```
 Error: Cannot find module '../src/apply' imported from
-'/home/kasm-user/tapkart/packages/net/test/apply.test.ts'
+'<repo>/packages/net/test/apply.test.ts'
   ...
 Caused by: Error: Failed to load url ../src/apply (resolved id: ../src/apply)
 in .../packages/net/test/apply.test.ts. Does the file exist?
@@ -10172,7 +10172,7 @@ Expected: FAIL. `packages/net/src/authority.ts` does not exist yet:
 
 ```
 Error: Cannot find module '../src/authority' imported from
-'/home/kasm-user/tapkart/packages/net/test/authority.test.ts'
+'<repo>/packages/net/test/authority.test.ts'
 Caused by: Error: Failed to load url ../src/authority (resolved id:
 ../src/authority) in .../authority.test.ts. Does the file exist?
 
@@ -10998,7 +10998,7 @@ Expected: FAIL. `packages/net/src/client.ts` does not exist yet:
 
 ```
 Error: Cannot find module '../src/client' imported from
-'/home/kasm-user/tapkart/packages/net/test/client.test.ts'
+'<repo>/packages/net/test/client.test.ts'
 Caused by: Error: Failed to load url ../src/client (resolved id: ../src/client)
 in .../client.test.ts. Does the file exist?
 
