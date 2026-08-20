@@ -120,11 +120,45 @@ function csvOf(env: Readonly<Record<string, string | undefined>>, name: string):
   return rawOf(env, name).split(',').map((part) => part.trim()).filter((part) => part.length > 0)
 }
 
+/**
+ * `TAPKART_*` variables that belong to the BUILD, not to the server, and which
+ * `parseConfig` therefore ignores rather than rejects.
+ *
+ * `TAPKART_ORIGIN` is build-time by ruling C-3: it is baked into the web bundle
+ * as `VITE_TAPKART_ORIGIN` and compiled into the Android intent filter, because
+ * an intent filter cannot be reconfigured at runtime. The server never reads it.
+ *
+ * It is listed here rather than left to the strict allowlist because it is
+ * legitimately present in the environment of anyone who builds and then runs —
+ * CI sets it workflow-wide, so every job inherits it. Treating a known sibling
+ * as a fatal unknown does not catch a typo, it stops the server booting: that
+ * is exactly what happened on this repository's first CI run, where the e2e
+ * lane died with "TAPKART_ORIGIN: unknown TAPKART_ variable" before a single
+ * test ran.
+ *
+ * The strict allowlist still stands for everything else — a mistyped
+ * `TAPKART_MAX_ROMS` is still fatal, which is the case it exists for.
+ */
+const BUILD_ONLY_NAMES: ReadonlySet<string> = new Set([
+  'TAPKART_ORIGIN',
+  // The signing variables, for the same reason and a sharper one. Plan 5's own
+  // signing task warned that these "must never enter the container, or
+  // parseConfig refuses to boot" -- a rule enforced only by job scoping in the
+  // release workflow. Tolerating them here removes the hazard instead of
+  // documenting it: the server ignores a keystore password rather than dying
+  // because one is in the environment, which is the correct response to a
+  // credential it has no business reading.
+  'TAPKART_KEYSTORE_PATH',
+  'TAPKART_KEYSTORE_PASSWORD',
+  'TAPKART_KEY_ALIAS',
+  'TAPKART_KEY_PASSWORD',
+])
+
 export function parseConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): ServerConfig {
   for (const key of Object.keys(env)) {
-    if (key.startsWith(TAPKART_PREFIX) && !KNOWN_NAMES.has(key)) {
+    if (key.startsWith(TAPKART_PREFIX) && !KNOWN_NAMES.has(key) && !BUILD_ONLY_NAMES.has(key)) {
       throw new Error(`${key}: unknown ${TAPKART_PREFIX} variable; see docs/server-env.md`)
     }
   }

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -123,7 +123,11 @@ describe('parseConfig defaults and overrides', () => {
 
   it('refuses unknown TAPKART variables by their own name', () => {
     expect(() => parseConfig({ TAPKART_SHADOW_ENABLED: 'true' })).toThrow(/TAPKART_SHADOW_ENABLED/)
-    expect(() => parseConfig({ TAPKART_ORIGIN: 'https://tapkart.example' })).toThrow(/TAPKART_ORIGIN/)
+    expect(() => parseConfig({ TAPKART_MAX_ROMS: '64' })).toThrow(/TAPKART_MAX_ROMS/)
+    // ...but a build-time sibling is ignored, not fatal: the server must boot
+    // with the build environment it is legitimately handed.
+    expect(() => parseConfig({ TAPKART_ORIGIN: 'https://tapkart.example' })).not.toThrow()
+    expect(() => parseConfig({ TAPKART_KEYSTORE_PASSWORD: 'hunter2' })).not.toThrow()
   })
 
   it('accepts but does not consume the two entrypoint variables', () => {
@@ -231,5 +235,39 @@ describe('C-6: compose.yaml agrees with ENV_SCHEMA', () => {
 
   it('names no private-network address', () => {
     expect(compose()).not.toMatch(/\b(?:10\.\d+|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./)
+  })
+})
+
+/**
+ * The workflows are the surface that actually bit. C-6's first pass checked
+ * compose.yaml; CI sets TAPKART_ORIGIN workflow-wide, every job inherits it,
+ * and the server refused to boot with "unknown TAPKART_ variable" before a
+ * single e2e test ran. A gate that covers one of two places a variable can be
+ * set is not a gate.
+ */
+describe('C-6: the CI workflows set no TAPKART_ variable the server would reject', () => {
+  const WORKFLOWS = join(HERE, '..', '..', '..', '.github', 'workflows')
+
+  function workflowFiles(): string[] {
+    return readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+  }
+
+  it('finds the workflows at all', () => {
+    expect(workflowFiles().length).toBeGreaterThan(0)
+  })
+
+  it.each(['ci.yml', 'release.yml'])('%s sets only variables the server tolerates', (file) => {
+    const text = readFileSync(join(WORKFLOWS, file), 'utf8')
+    // Every `TAPKART_FOO:` assignment, anywhere in the file, at any nesting.
+    const assigned = [...text.matchAll(/^\s*(TAPKART_[A-Z0-9_]+):/gm)].map((m) => m[1])
+    expect(assigned.length).toBeGreaterThan(0)
+
+    // Tolerated means: parseConfig does not throw when it is present.
+    for (const name of new Set(assigned)) {
+      expect(
+        () => parseConfig({ [name]: '' }),
+        `${file} sets ${name}, which parseConfig rejects — the server will not boot`,
+      ).not.toThrow()
+    }
   })
 })
