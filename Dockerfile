@@ -45,9 +45,9 @@ ENV STATIC_ROOT=/app/web
 ENV SHADOW_ENABLED=true
 
 USER node
-EXPOSE 3031
+EXPOSE 3037
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "const p=process.env.PORT||'3031';fetch('http://127.0.0.1:'+p+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const p=process.env.PORT||'3037';fetch('http://127.0.0.1:'+p+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/app/entrypoint.sh"]

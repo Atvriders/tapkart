@@ -18,6 +18,56 @@ export const HOOKS = {
 /** Mirrors ROOM_CODE_ALPHABET and ROOM_CODE_LENGTH from @tapkart/protocol. */
 export const ROOM_CODE_RE = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{5}$/
 
+/**
+ * Navigate to `path` and return with the service worker controlling a page that
+ * will not navigate again underneath the caller.
+ *
+ * `apps/web/src/main.ts` reloads the page the first time the worker takes
+ * control. That reload fires at the moment `controller !== null` becomes true,
+ * so the naive `goto` + wait leaves the caller holding a context the reload is
+ * about to destroy -- "Execution context was destroyed", about one run in three
+ * on an unmodified tree.
+ *
+ * The fix is to wait for that reload's own `load` event rather than to race it.
+ * The listener is armed BEFORE navigating, so the event cannot be missed. The
+ * wait is bounded and its timeout is discarded on purpose: the reload is
+ * dispatched straight from the `controllerchange` handler, so if it does not
+ * arrive, the page was already controlled when it loaded and no reload was ever
+ * coming. Either way the document that exists afterwards loaded under the
+ * worker's control, fires no `controllerchange`, and is stable for the rest of
+ * the test.
+ *
+ * Two approaches that do NOT work, both measured: navigating a second time only
+ * moves the race, and the second `goto` is interrupted by the pending reload
+ * ("Navigation to ... is interrupted by another navigation to ..."); absorbing
+ * the reload with a throwaway page turned an occasional fast failure into a
+ * ten-minute hang.
+ */
+export async function gotoControlled(page: Page, path = '/'): Promise<void> {
+  const controlled = () =>
+    page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+      timeout: 30_000,
+    })
+
+  let loads = 0
+  page.on('load', () => {
+    loads += 1
+  })
+  await page.goto(path)
+  await controlled()
+  // Wait out the app's one-shot reload: the initial load counts as 1, so a
+  // second load is the reload landing. Bounded, because on an already-controlled
+  // page no reload is coming and the count never reaches 2.
+  await page
+    .waitForFunction(() => document.readyState === 'complete', undefined, { timeout: 5_000 })
+    .catch(() => undefined)
+  const start = Date.now()
+  while (loads < 2 && Date.now() - start < 5_000) {
+    await page.waitForTimeout(100)
+  }
+  await controlled()
+}
+
 export function hook(page: Page, name: keyof typeof HOOKS) {
   return page.getByTestId(HOOKS[name])
 }

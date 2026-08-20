@@ -6,10 +6,10 @@ services:
     image: ghcr.io/atvriders/tapkart:${TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${PORT:-3031}:${PORT:-3031}"
+      - "${PORT:-3037}:${PORT:-3037}"
     environment:
       # One host-side PORT value selects both the published and bound port.
-      PORT: "${PORT:-3031}"
+      PORT: "${PORT:-3037}"
 
       # Read by the entrypoint at container start, never by the server. Both
       # default to empty so a self-hoster without an APK gets a working server

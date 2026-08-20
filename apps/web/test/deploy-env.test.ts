@@ -10,6 +10,8 @@ const read = (rel: string): string =>
 
 const DOCKERFILE = read('Dockerfile')
 const COMPOSE = read('compose.yaml')
+const README = read('README.md')
+const ROOT_PKG = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
 
 /** ENV_SCHEMA ∪ ASSETLINKS_ENV_VARS — §11.2: the deployment's variables are
  * exactly this union, and nothing else may appear in either file. */
@@ -152,6 +154,45 @@ describe('L3: no TAPKART_ variable reaches a server that would reject it', () =>
     for (const text of [DOCKERFILE, COMPOSE]) {
       expect(text).not.toMatch(/^\s*#?\s*(ENV\s+)?TAPKART_ORIGIN\b/m)
     }
+  })
+})
+
+/**
+ * STATIC_ROOT defaults to the RELATIVE path `apps/web/dist`, resolved against the
+ * process's working directory. That makes the server's ability to serve the game
+ * a property of where it was launched from, and `npm run -w <pkg>` relocates the
+ * working directory into the package.
+ *
+ * So `npm run start -w @tapkart/server` -- which the README printed for the whole
+ * of Plan 5 -- resolved STATIC_ROOT to `packages/server/apps/web/dist`, which does
+ * not exist. `/` returned 404 while `/healthz` returned 200, so the failure read
+ * as a bad build rather than a bad instruction, and nothing in the suite noticed:
+ * every path that actually works pins the root explicitly (the e2e lane runs the
+ * bundle from the repository root, and the image sets an absolute STATIC_ROOT
+ * under WORKDIR /app).
+ *
+ * The root `start` script is the fix -- `npm run` at the root leaves the working
+ * directory at the root -- and this gate is what stops the README drifting back
+ * to a per-package invocation that silently serves nothing.
+ */
+describe('the documented local run command resolves STATIC_ROOT', () => {
+  it('runs the server bundle from the repository root', () => {
+    const start = ROOT_PKG.scripts.start
+    expect(start, 'the root package.json needs a `start` script').toBeDefined()
+    expect(start).toBe('node packages/server/dist/main.mjs')
+  })
+
+  it('the default STATIC_ROOT is relative, which is why the root matters', () => {
+    const spec = ENV_SCHEMA.find((entry) => entry.name === 'STATIC_ROOT')
+    expect(spec?.defaultValue).toBe('apps/web/dist')
+    expect(spec!.defaultValue!.startsWith('/')).toBe(false)
+  })
+
+  it("the README's run block invokes that script, never a per-package one", () => {
+    const block = /```bash\nnpm run build:server\n([^\n]+)\n```/.exec(README)
+    expect(block, "README has no `npm run build:server` run block").not.toBeNull()
+    expect(block![1]).toBe('npm start')
+    expect(README).not.toMatch(/npm run start -w/)
   })
 })
 

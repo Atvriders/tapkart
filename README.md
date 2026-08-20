@@ -31,10 +31,10 @@ bundle, then start the server from the repository root:
 
 ```bash
 npm run build:server
-npm run start -w @tapkart/server
+npm start
 ```
 
-Open `http://127.0.0.1:3031`. The same process serves the SPA, the health route,
+Open `http://127.0.0.1:3037`. The same process serves the SPA, the health route,
 and the `/ws` WebSocket endpoint. Re-run `npm run build:server` after source
 changes. For quick solo-only frontend work, `npm run dev -w @tapkart/web` starts
 Vite on port 5173; it does not proxy the multiplayer WebSocket server.
@@ -99,7 +99,7 @@ health endpoint. At startup it can also generate
 ```bash
 curl -O https://raw.githubusercontent.com/Atvriders/tapkart/master/compose.yaml
 docker compose up -d
-curl --fail http://127.0.0.1:3031/healthz
+curl --fail http://127.0.0.1:3037/healthz
 ```
 
 Compose pulls `latest`, which moves only for a `v*` release. **No release has
@@ -115,7 +115,7 @@ tags identify exact builds. The release and edge images target `linux/amd64`
 and `linux/arm64`.
 
 Put TLS and your own hostname in a reverse proxy or tunnel in front of port
-3031. It must preserve WebSocket upgrades on `/ws`. The browser constructs
+3037. It must preserve WebSocket upgrades on `/ws`. The browser constructs
 invite links from `location.origin`, so changing the web deployment's domain
 does not require rebuilding the container.
 
@@ -123,7 +123,7 @@ does not require rebuilding the container.
 
 Every server variable, type, default, and operational note lives in
 [`docs/server-env.md`](docs/server-env.md); this README intentionally does not
-duplicate that generated table. `compose.yaml` exposes the server on port 3031
+duplicate that generated table. `compose.yaml` exposes the server on port 3037
 and carries commented defaults for the common room, relay, ICE, and shadow
 settings.
 

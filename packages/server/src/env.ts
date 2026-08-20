@@ -17,7 +17,7 @@ const DEFAULT_ICE_URLS = DEFAULT_ICE_SERVERS.flatMap((server) => server.urls).jo
 /** The sole declaration of every environment variable accepted by the image. */
 export const ENV_SCHEMA: readonly EnvVarSpec[] = [
   {
-    name: 'PORT', kind: 'number', required: false, defaultValue: '3031',
+    name: 'PORT', kind: 'number', required: false, defaultValue: '3037',
     description: 'The port the HTTP and WebSocket server binds. Spec §9.',
   },
   {

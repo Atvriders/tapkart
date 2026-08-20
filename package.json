@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "build:server": "npm run build -w @tapkart/web && npm run build -w @tapkart/server"
+    "build:server": "npm run build -w @tapkart/web && npm run build -w @tapkart/server",
+    "start": "node packages/server/dist/main.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

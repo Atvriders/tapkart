@@ -159,7 +159,7 @@ describe('routeRequest — path parsing', () => {
   })
 
   it('handles a port in the origin', () => {
-    expect(routeRequest(req({ url: 'http://127.0.0.1:3031/healthz' }), cfg).action).toBe('networkOnly')
+    expect(routeRequest(req({ url: 'http://127.0.0.1:3037/healthz' }), cfg).action).toBe('networkOnly')
   })
 
   it('is not fooled by a precache entry appearing inside a longer path', () => {

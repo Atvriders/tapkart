@@ -11,7 +11,7 @@ against that source, so configuration drift is a build failure.
 
 | Variable | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `PORT` | number | no | `3031` | The port the HTTP and WebSocket server binds. Spec §9. |
+| `PORT` | number | no | `3037` | The port the HTTP and WebSocket server binds. Spec §9. |
 | `BIND_HOST` | string | no | `0.0.0.0` | The address to bind. A wildcard, never a real hostname. |
 | `STATIC_ROOT` | string | no | `apps/web/dist` | The web build to serve, relative to the working directory. `<STATIC_ROOT>/.well-known/` is the one well-known directory. |
 | `MAX_ROOMS` | number | no | `64` | Rooms per process. At the cap a create is refused rather than a live race evicted. |

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { gotoControlled } from './fixtures/tapkart'
+
 /**
  * This runs against the built app. The service worker is emitted only by the
  * production build, so a dev-server green cannot satisfy the offline contract.
@@ -14,10 +16,7 @@ test('the installed app opens and runs a solo race with the network off', async 
     'GET /sw.js did not return 200 — build @tapkart/web and serve apps/web/dist',
   ).toBe(200)
 
-  await page.goto('/')
-  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
-    timeout: 30_000,
-  })
+  await gotoControlled(page)
 
   await context.setOffline(true)
   try {

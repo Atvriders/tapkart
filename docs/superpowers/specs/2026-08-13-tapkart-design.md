@@ -781,7 +781,8 @@ Both are owner-verified.
   it breaks App Links verification and update installs for every user.
 - **APK distribution:** published as a GitHub Release asset, since the owner is
   responsible for on-device NFC verification.
-- **Self-host:** compose file, port 3031.
+- **Self-host:** compose file, port 3037 (owner's decision, 2026-08-20; 3031 as
+  originally specified collided with another service on their host).
 - **Domain:** Cloudflare Tunnel, which must serve `/.well-known/assetlinks.json`
   with no redirect.
 

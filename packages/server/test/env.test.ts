@@ -59,7 +59,7 @@ describe('parseConfig defaults and overrides', () => {
 
   it('matches the pinned production defaults', () => {
     expect(parseConfig({})).toEqual({
-      port: 3031,
+      port: 3037,
       bindHost: '0.0.0.0',
       staticRoot: 'apps/web/dist',
       maxRooms: 64,
@@ -209,7 +209,7 @@ describe('C-6: compose.yaml agrees with ENV_SCHEMA', () => {
     // Compose substitutes `${VAR:-default}`; an unset host env yields the default,
     // and for the two APK variables that default is the empty string.
     const env: Record<string, string> = {}
-    for (const key of live) env[key] = key === 'PORT' ? '3031' : ''
+    for (const key of live) env[key] = key === 'PORT' ? '3037' : ''
     expect(() => parseConfig(env)).not.toThrow()
   })
 

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { gotoControlled } from './fixtures/tapkart'
+
 /**
  * The raw Plan 4 server deliberately has no generated assetlinks file: only
  * the container entrypoint creates it. A network 404 here is therefore the
@@ -9,10 +11,7 @@ test('/.well-known/assetlinks.json stays network-only and lands in no cache', as
   page,
   context,
 }) => {
-  await page.goto('/')
-  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
-    timeout: 30_000,
-  })
+  await gotoControlled(page)
 
   const online = await page.evaluate(async () => {
     const url = new URL('/.well-known/assetlinks.json', location.origin).toString()

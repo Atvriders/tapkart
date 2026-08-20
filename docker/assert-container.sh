@@ -4,7 +4,7 @@
 set -euo pipefail
 
 image="${1:?usage: assert-container.sh <image-tag>}"
-port="${TAPKART_ASSERT_PORT:-3031}"
+port="${TAPKART_ASSERT_PORT:-3037}"
 container="tapkart-assert-$$"
 body_file="$(mktemp)"
 
@@ -39,7 +39,7 @@ wait_for_health() {
 }
 
 echo "== 30a. the container starts with both TAPKART_ variables set =="
-docker run -d --name "$container" -p "127.0.0.1:$port:3031" \
+docker run -d --name "$container" -p "127.0.0.1:$port:3037" \
   -e "TAPKART_ANDROID_PACKAGE=$package" \
   -e "TAPKART_SHA256_FINGERPRINTS=$fingerprints" \
   "$image" >/dev/null
@@ -97,7 +97,7 @@ NODE
 
 echo "== 31. the container also starts with no TAPKART_ variables =="
 docker rm -f "$container" >/dev/null
-docker run -d --name "$container" -p "127.0.0.1:$port:3031" "$image" >/dev/null
+docker run -d --name "$container" -p "127.0.0.1:$port:3037" "$image" >/dev/null
 wait_for_health || fail "a self-hoster with no APK could not start the server"
 docker logs "$container" 2>&1 | grep -q 'no assetlinks.json written' ||
   fail "the entrypoint did not explain why it wrote no assetlinks.json"
