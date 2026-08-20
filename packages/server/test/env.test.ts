@@ -156,3 +156,80 @@ describe('formatEnvTable', () => {
     expect(readFileSync(ENV_DOC, 'utf8')).not.toMatch(/\b(?:10\.\d+|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./)
   })
 })
+
+/**
+ * C-6: `env.ts` is the single source of truth for configuration, and the files
+ * that set it must be checked against it.
+ *
+ * The doc was already checked above. The compose file was not, and nothing in
+ * the repository referenced it — which matters more than it sounds, because
+ * `parseConfig` THROWS on an unknown `TAPKART_*` variable (env.ts:128). A
+ * compose file that sets a variable the schema does not declare does not
+ * misconfigure the server; it stops the container booting at all. That exact
+ * failure was found once by cross-reading two contract drafts, fixed, and then
+ * left with no guard against recurring.
+ */
+describe('C-6: compose.yaml agrees with ENV_SCHEMA', () => {
+  const COMPOSE = join(HERE, '..', '..', '..', 'compose.yaml')
+  const compose = (): string => readFileSync(COMPOSE, 'utf8')
+
+  /** Every `KEY: "..."` under the service's `environment:` block, commented or not. */
+  function composeEnvKeys(text: string): { live: string[]; commented: string[] } {
+    const lines = text.split('\n')
+    const start = lines.findIndex((l) => /^\s*environment:\s*$/.test(l))
+    expect(start).toBeGreaterThanOrEqual(0)
+    const live: string[] = []
+    const commented: string[] = []
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (/^\s{0,4}\S/.test(line) && !/^\s*#/.test(line)) break // dedent ends the block
+      const live_m = /^\s+([A-Z][A-Z0-9_]*):\s/.exec(line)
+      if (live_m !== null) { live.push(live_m[1]); continue }
+      const dead_m = /^\s+#\s*([A-Z][A-Z0-9_]*):\s/.exec(line)
+      if (dead_m !== null) commented.push(dead_m[1])
+    }
+    return { live, commented }
+  }
+
+  it('sets no variable the schema does not declare', () => {
+    const { live, commented } = composeEnvKeys(compose())
+    const declared = new Set(ENV_SCHEMA.map((s) => s.name))
+    // Non-vacuity: the block must actually have been found and parsed.
+    expect(live.length).toBeGreaterThan(0)
+    expect(commented.length).toBeGreaterThan(0)
+    expect([...live, ...commented].filter((k) => !declared.has(k))).toEqual([])
+  })
+
+  it('boots: parseConfig accepts exactly the environment compose produces', () => {
+    const { live } = composeEnvKeys(compose())
+    // Compose substitutes `${VAR:-default}`; an unset host env yields the default,
+    // and for the two APK variables that default is the empty string.
+    const env: Record<string, string> = {}
+    for (const key of live) env[key] = key === 'PORT' ? '3031' : ''
+    expect(() => parseConfig(env)).not.toThrow()
+  })
+
+  it('carries a generated-defaults block that matches the schema, in order', () => {
+    const text = compose()
+    const block = /# BEGIN GENERATED DEFAULTS[^\n]*\n([\s\S]*?)\s*# END GENERATED DEFAULTS/.exec(text)
+    expect(block).not.toBeNull()
+    const rows = (block as RegExpExecArray)[1]
+      .split('\n')
+      .map((l) => /^\s*#\s*([A-Z][A-Z0-9_]*):\s*"(.*)"\s*$/.exec(l))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => [m[1], m[2]] as const)
+
+    // Every row is a real schema entry carrying that entry's real default.
+    expect(rows.length).toBeGreaterThan(0)
+    for (const [name, value] of rows) expect(specOf(name).defaultValue).toBe(value)
+
+    // And the block's order follows ENV_SCHEMA's, so a reordered schema is visible.
+    const order = ENV_SCHEMA.map((s) => s.name)
+    const idx = rows.map(([name]) => order.indexOf(name))
+    expect(idx).toEqual([...idx].sort((a, b) => a - b))
+  })
+
+  it('names no private-network address', () => {
+    expect(compose()).not.toMatch(/\b(?:10\.\d+|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./)
+  })
+})
