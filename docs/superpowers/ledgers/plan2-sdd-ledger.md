@@ -966,3 +966,34 @@ Final fix pass concerns: (1) cursors are anchored on THEMSELVES, not on each loo
   closure, and a client stalled past ~1.9 s still needs a checkpoint path ClientLoop lacks.
   (3) Two barrel exports the brief did not specify — makeRemoteSample / makeRemoteEntitySample,
   unavoidable for the out-param form; now in the Plan 3 amendment.
+
+=== POST-MERGE HARDENING (2026-08-20, after Plans 4-5 merged at 5d3297e) ===
+
+Ruling P3-R63 (C-6 closed). compose.yaml was never checked against ENV_SCHEMA, and nothing in the
+  repo referenced it. That is worse than ordinary drift because parseConfig THROWS on an unknown
+  TAPKART_* variable: an undeclared name in compose does not misconfigure the server, it stops the
+  container booting. The failure was found once by cross-reading two contract drafts, fixed, and
+  left unguarded. Now four assertions, mutation-verified three ways (undeclared var fails the rule
+  AND the boot check; a drifted default fails the block check; reversing the block's order fails it).
+
+Ruling P3-R64 (a real defect, and a new instance of an old shape). DEFAULT_TRACK_THEME — the
+  fallback EVERY unthemed track renders from — had road/ground only 0.083 apart in sqrt space,
+  under the 0.10 floor all six shipped themes clear. A grey road on the same grey ground.
+  It survived because **the legibility gate only ever inspected GENERATED content**: the fallback
+  is hand-written in theme.ts, where the pipeline never looked. Same family as B2 (theme.ground
+  gated but rendered by nothing) and P3-R62 (sky.top gated and unrendered) — a value checked in one
+  place and consumed in another, with no path between the two.
+  Fixed by darkening the fallback ground to [0.09, 0.11, 0.09] (0.206), not by loosening the rule,
+  and the fallback is now required to re-parse through its own parser — a fallback its own
+  validator would reject is a latent crash rather than a cosmetic flaw.
+
+Ruling P3-R65 (cross-field constraints now bind at load, not only at generation). parseKartDescriptor
+  and parseTrackTheme validated fields INDEPENDENTLY, so each accepted records that were
+  individually in range and jointly nonsense — the same shape as glacier-pass's fold, where every
+  field was legal and the combination folded the drivable surface. The legibility thresholds lived
+  only in the delegation gate, which runs when content is GENERATED, never when it is LOADED.
+  Moved into the parser so they bind every caller; the gate now calls the parser rather than
+  restating the formula, keeping only the two roster-scope checks a per-record parser cannot see.
+  Note the honest disclosure: `wheelWidth < chassisWidth / 2` is UNREACHABLE from in-range values
+  (max wheelWidth 0.35 < min chassisWidth/2 = 0.45), so it is evaluated on any two finite numbers
+  rather than gated behind the ranges — gated, it would be untestable code.
