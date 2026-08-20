@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
-import { HOOKS, hook, hostRoom, joinRoom } from './fixtures/tapkart'
+import { HOOKS, hook, hostRoom, joinRoomFromInvite } from './fixtures/tapkart'
 
-test('two browser contexts join by code and both finish the race', async ({ browser, baseURL }) => {
+test('an invite guest finishes a race and follows the host into a rematch', async ({ browser, baseURL }) => {
   const contextOptions = {
     baseURL,
     viewport: { width: 1280, height: 720 },
@@ -17,7 +17,7 @@ test('two browser contexts join by code and both finish the race', async ({ brow
 
   try {
     const code = await hostRoom(host)
-    await joinRoom(guest, code)
+    await joinRoomFromInvite(guest, code, String(baseURL))
 
     await expect(hook(host, 'roomCodeDisplay')).toHaveText(new RegExp(code, 'i'))
     await expect(hook(guest, 'readyButton')).toBeVisible()
@@ -33,6 +33,15 @@ test('two browser contexts join by code and both finish the race', async ({ brow
 
     await expect(hook(host, 'resultsScreen')).toBeVisible({ timeout: 540_000 })
     await expect(hook(guest, 'resultsScreen')).toBeVisible({ timeout: 60_000 })
+
+    await host.getByRole('button', { name: 'BACK TO LOBBY', exact: true }).click()
+    await expect(hook(host, 'startButton')).toBeVisible()
+    await expect(hook(guest, 'resultsScreen')).toBeVisible()
+    await hook(host, 'startButton').click()
+
+    await expect(hook(guest, 'resultsScreen')).toHaveCount(0)
+    await expect(hook(guest, 'lapCounter')).toBeVisible()
+    await expect(hook(guest, 'lapCounter')).toHaveText('LAP 1/3', { timeout: 60_000 })
     expect(errors).toEqual([])
   } finally {
     await hostContext.close()
