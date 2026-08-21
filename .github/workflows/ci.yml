@@ -3,6 +3,15 @@ name: ci
 on:
   workflow_dispatch:
   push:
+    # Both keys are deliberate. GitHub skips an event for any ref category left
+    # undefined, so `tags-ignore` alone would stop branch pushes from building
+    # at all. `edge` is the rolling prerelease tag this workflow moves itself;
+    # without the exclusion each master build would push a tag that started a
+    # second, duplicate build.
+    branches:
+      - '**'
+    tags-ignore:
+      - edge
   pull_request:
 
 permissions:
@@ -163,3 +172,66 @@ jobs:
             grep -q 'linux/amd64' "/tmp/$tag.inspect" || { echo "$tag: amd64 missing"; exit 1; }
             grep -q 'linux/arm64' "/tmp/$tag.inspect" || { echo "$tag: arm64 missing"; exit 1; }
           done
+
+  edge-apk:
+    # The installable APK, published where a phone can actually reach it.
+    #
+    # The `android` job already builds this APK and uploads it as a run
+    # artifact, but an artifact needs a GitHub login, arrives as a ZIP, and
+    # expires after ninety days -- three obstacles between a person and the
+    # phone they mean to install it on. A prerelease asset is a direct `.apk`
+    # at a URL that never changes and never expires.
+    #
+    # Gated behind the same jobs as the image: an APK is published only from a
+    # commit whose tests, e2e lane, and container assertions all passed.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [web, android, e2e, container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tapkart-debug-apk
+          path: apk
+      - name: move the edge tag to this commit
+        run: |
+          set -euo pipefail
+          # The release is attached to the tag NAME, so moving the tag is what
+          # keeps the release page honest about which commit the asset is from.
+          # `tags-ignore` above is what stops this push starting another build.
+          git tag -f edge "$GITHUB_SHA"
+          git push -f origin refs/tags/edge
+      - name: publish the rolling debug prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          src="$(find apk -type f -name '*.apk' -print -quit)"
+          test -n "$src" || { echo "the android job published no APK"; exit 1; }
+          install -m 0644 "$src" "$RUNNER_TEMP/tapkart-debug.apk"
+
+          {
+            echo 'The current `master` build, as an installable APK.'
+            echo
+            echo '**This is a debug build.** It is signed with Android'"'"'s universal debug'
+            echo 'key, not the release keystore, so **App Links do not verify**: a tapped'
+            echo 'invite opens the browser instead of the app. NFC, QR, and room-code joins'
+            echo 'all work. It is also built against this repository'"'"'s reserved example'
+            echo 'origin, not a deployment.'
+            echo
+            echo 'The signed APK that routes invites into the app comes from a `v*` release.'
+            echo
+            echo 'This link always serves the newest green `master` build:'
+            echo 'https://github.com/Atvriders/tapkart/releases/download/edge/tapkart-debug.apk'
+            echo
+            echo "Built from commit $GITHUB_SHA."
+          } > "$RUNNER_TEMP/notes.md"
+
+          gh release view edge >/dev/null 2>&1 ||
+            gh release create edge --prerelease --title 'Edge (debug build)' \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          gh release edit edge --prerelease --title 'Edge (debug build)' \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          gh release upload edge "$RUNNER_TEMP/tapkart-debug.apk" --clobber

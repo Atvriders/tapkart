@@ -11,6 +11,7 @@ const read = (rel: string): string =>
 const DOCKERFILE = read('Dockerfile')
 const COMPOSE = read('compose.yaml')
 const README = read('README.md')
+const CI_WORKFLOW = read('.github/workflows/ci.yml')
 const ROOT_PKG = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
 
 /** ENV_SCHEMA ∪ ASSETLINKS_ENV_VARS — §11.2: the deployment's variables are
@@ -305,6 +306,45 @@ describe('the image is wired the way §11.1 fixes it', () => {
    * carries it, including a local `docker build` and the release workflow, which
    * is a second `build-push-action` that would otherwise need the same fix again.
    */
+  /**
+   * The rolling `edge` prerelease carries the installable APK, and the trigger
+   * that makes it safe.
+   *
+   * The `edge-apk` job moves the `edge` tag to the commit it publishes, so the
+   * release page names the commit the asset was actually built from. A tag push
+   * is a `push` event, so without an exclusion every master build would push a
+   * tag that started a second, duplicate build of the entire workflow.
+   *
+   * The exclusion has a trap of its own, and it is the reason this is gated
+   * rather than trusted: GitHub skips an event for any ref category the trigger
+   * leaves undefined, so a `push:` block naming ONLY `tags-ignore` stops branch
+   * pushes from building at all. CI would go quiet -- not red, quiet -- and a
+   * quiet CI reads as a repository nobody has pushed to.
+   */
+  it('excludes the rolling tag from push builds without muting branch builds', () => {
+    const push = /\n  push:\n([\s\S]*?)\n  [a-z_]+:/.exec(CI_WORKFLOW)
+    expect(push, 'ci.yml has no push trigger block').not.toBeNull()
+    const block = push![1]
+    expect(block, 'tags-ignore without branches mutes every branch build').toMatch(
+      /branches:\s*\n\s*-\s*'\*\*'/,
+    )
+    expect(block).toMatch(/tags-ignore:\s*\n\s*-\s*edge/)
+  })
+
+  it('publishes the APK only from a commit that passed every gate', () => {
+    const job = /\n  edge-apk:\n([\s\S]*?)(?=\n  [a-z-]+:\n|$)/.exec(CI_WORKFLOW)
+    expect(job, 'ci.yml has no edge-apk job').not.toBeNull()
+    const body = job![1]
+    // The same gates the image waits on: an APK is never published from a
+    // commit whose tests, e2e lane, or container assertions did not pass.
+    expect(body).toMatch(/needs:\s*\[web, android, e2e, container\]/)
+    expect(body).toMatch(/github\.ref == 'refs\/heads\/master'/)
+    expect(body).toMatch(/contents:\s*write/)
+    // A prerelease, so it can never be mistaken for the signed release build.
+    expect(body).toMatch(/--prerelease/)
+    expect(body).toMatch(/tapkart-debug\.apk/)
+  })
+
   it('labels the image with the repository that publishes it', () => {
     const runtime = DOCKERFILE.slice(DOCKERFILE.indexOf('AS runtime'))
     const source = /org\.opencontainers\.image\.source="([^"]+)"/.exec(runtime)

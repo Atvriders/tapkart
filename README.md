@@ -166,12 +166,23 @@ including no trailing-slash redirect. Then complete the on-device checks in
 
 Two are published, and the difference between them is not cosmetic.
 
-The **debug APK** is attached to every successful `master` CI run as the
-`tapkart-debug-apk` artifact (Actions → the run → Artifacts). It installs and
-plays, and NFC, QR, and room-code joins all work. It is signed with Android's
-universal debug key, so App Links will **not** verify: a tapped invite opens
-the browser rather than the app. It is also built against this repository's
-reserved example origin, not a deployment.
+The **debug APK** is published to the rolling [`edge`
+prerelease](https://github.com/Atvriders/tapkart/releases/tag/edge) by every
+successful `master` build. Open this on the phone you want it on — no GitHub
+account needed, and the link never changes:
+
+```
+https://github.com/Atvriders/tapkart/releases/download/edge/tapkart-debug.apk
+```
+
+It installs and plays, and NFC, QR, and room-code joins all work. It is signed
+with Android's universal debug key, so App Links will **not** verify: a tapped
+invite opens the browser rather than the app. It is also built against this
+repository's reserved example origin, not a deployment.
+
+The same file is also a run artifact (`tapkart-debug-apk`, under Actions → the
+run → Artifacts), but that copy needs a GitHub login, arrives as a ZIP, and
+expires after ninety days. Prefer the release link.
 
 The **signed release APK** is attached to each GitHub Release, built by
 `release.yml` from a `v*` tag. That one is signed with the project keystore and
