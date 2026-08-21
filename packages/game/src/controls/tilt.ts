@@ -1,8 +1,8 @@
 import type { Intent } from '@tapkart/sim'
 import { DRIFT_STEER_MIN, clamp, lerp } from '@tapkart/sim'
 import type { ControlAdapter, ControlInputs, TiltSample } from './types'
-import type { ControlConfig, Rect } from './config'
-import { BRAKE_HOLD_TICKS, driftButtonRect, itemButtonRect, rectContains } from './config'
+import type { ControlConfig, ControlMetrics, Rect } from './config'
+import { BRAKE_HOLD_TICKS, controlMetrics, createControlMetrics, driftButtonRect, itemButtonRect, rectContains } from './config'
 
 export interface TiltCalibration { betaZero: number; gammaZero: number } // degrees
 
@@ -29,6 +29,7 @@ export function calibrateTilt(sample: TiltSample): TiltCalibration {
 export function makeTiltAdapter(cfg: ControlConfig): ControlAdapter {
   const driftRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const itemRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const metrics: ControlMetrics = createControlMetrics()
 
   let driftId = -1
   let itemId = -1
@@ -39,8 +40,9 @@ export function makeTiltAdapter(cfg: ControlConfig): ControlAdapter {
     scheme: 'tilt',
 
     sample(raw: ControlInputs, tick: number, out: Intent): void {
-      driftButtonRect(raw.viewport, driftRect)
-      itemButtonRect(raw.viewport, itemRect)
+      controlMetrics(raw.viewport, raw.insets, metrics)
+      driftButtonRect(raw.viewport, metrics, driftRect)
+      itemButtonRect(raw.viewport, metrics, itemRect)
 
       let itemPulse = false
 

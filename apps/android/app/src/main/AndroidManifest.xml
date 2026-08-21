@@ -14,13 +14,33 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!--
+            No android:screenOrientation. The lock was already unenforceable on
+            the devices it mattered for — targetSdk 36 means Android 16 ignores
+            it on any display with sw >= 600dp — so a tablet or an unfolded
+            foldable could already boot portrait, and every viewport is now a
+            real playable layout (R51).
+
+            configChanges is what turns a fold, an unfold, a multi-window drag
+            or a bar toggle into a resize instead of an activity recreation. A
+            recreation reloads the WebView and drops the live race back to the
+            title screen with no error anywhere, which gets debugged as a
+            networking bug. density|fontScale are there because a foldable's
+            inner and outer panels can report different densities, so an unfold
+            mid-race is a density change as well as a size change.
+
+            resizeableActivity is already the platform default for targetSdk
+            >= 24. It is declared anyway so it is a stated intent that
+            assert-manifest.mjs can actually see — an assertion cannot fail on
+            an implicit default.
+        -->
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|fontScale"
             android:exported="true"
             android:label="@string/title_activity_main"
             android:launchMode="singleTask"
-            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
             android:theme="@style/AppTheme.NoActionBarLaunch">
 
             <intent-filter>

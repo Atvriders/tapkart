@@ -74,6 +74,46 @@ out; without STUN, direct WebRTC may be limited to the same LAN, while the
 WebSocket relay remains available. See
 [`docs/server-env.md`](docs/server-env.md) for the exact syntax and defaults.
 
+## Display, orientation, and controls
+
+Tapkart lays out for whatever viewport it is given. Portrait, landscape, square,
+a tablet, and a foldable's cover screen each get a real layout: button size, the
+gap between buttons, the inset from the screen edge, the steering band, and the
+thumb travel to full lock are all derived from the short edge of the viewport
+rather than fixed at one phone's numbers. There is no "rotate your device"
+prompt, and neither artifact locks the orientation. The one refusal left is a
+window too small to lay out at all — roughly under 165 CSS px on its short edge,
+which in practice means an extreme multi-window sliver. That state says **Make
+this window larger** and also feeds the simulation a neutral intent, so the race
+keeps ticking safely and nothing can be pressed through the message.
+
+Layout respects the safe area. Display cutouts, rounded corners, and the Android
+gesture bar push the controls, the HUD, and the menu screens inward. The insets
+are read from `env(safe-area-inset-*)` and from the `--safe-area-inset-*` custom
+properties Capacitor injects into the WebView, whichever is larger; the `env()`
+values alone are not dependable inside the app.
+
+The camera holds a fixed vertical field of view and softly bands the horizontal
+field that the aspect ratio implies, so a very wide cover screen no longer sees
+far more of the track than a portrait phone does. A 16:9 phone is unchanged.
+
+**In the browser**, the game requests fullscreen on your first tap on a menu
+button — the earliest moment a browser will accept the request. If you leave
+fullscreen deliberately it does not ask again; a **Fullscreen** row in settings
+turns it back on. That row is hidden where the Fullscreen API does not exist
+(iPhone Safari has none), and the game stays fully playable with browser chrome
+visible. The installed PWA declares `"display": "fullscreen"` and
+`"orientation": "any"`.
+
+**In the Android app**, the status and navigation bars are hidden together, an
+edge swipe brings them back only transiently, and they re-hide when the window
+regains focus. The activity absorbs rotation, folding, resizing, and density
+changes itself instead of being recreated, so a live race survives a rotate or a
+fold.
+
+None of the on-device behaviour above can be proved by CI. See items 16 through
+29 of [`docs/owner-verification.md`](docs/owner-verification.md).
+
 ## PWA and offline behavior
 
 `npm run build -w @tapkart/web` generates the manifest, icons, Vite bundle, and

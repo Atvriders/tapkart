@@ -148,3 +148,105 @@ describe('GameShell invite/lifecycle composition (§2.3, §15.2)', () => {
     )
   })
 })
+
+describe('every viewport lays out (R40 superseded, 2026-08-21)', () => {
+  const frameHead = (): string => between('function frame(): void', 'inputSource.drain(rawInputs)')
+
+  /** Comments explain the change; only the CODE may be asserted about. Without
+   * this, a comment that merely NAMES the removed behaviour fails the gate. */
+  const codeOnly = (s: string): string =>
+    s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+
+  it('resizes the renderer unconditionally and resets the adapter on the size edge', () => {
+    const slice = frameHead()
+    // The resize used to sit inside `if (!portrait)`, which left a portrait tablet
+    // showing a stale drawing buffer stretched by CSS, with no way out.
+    expect(slice).toContain('renderer.resize(viewport.width, viewport.height, dpr)')
+    // A steering origin latched in the old geometry means nothing in the new one.
+    expect(slice).toContain('adapter.reset()')
+    expect(slice).toContain('controlMetrics(viewport, insets, metrics)')
+  })
+
+  it('has no orientation gate anywhere in the shell', () => {
+    // Anti-vacuity: prove the pattern CAN match this file before trusting that it
+    // does not. Without this, deleting the word from the codebase would make the
+    // assertion below pass for the wrong reason forever.
+    expect(/portrait/i.test(SHELL_SOURCE)).toBe(true) // the superseding note says the word
+    expect(/portrait/i.test(codeOnly(SHELL_SOURCE))).toBe(false)
+    expect(codeOnly(frameHead())).not.toMatch(/portrait|landscape/i)
+    expect(SHELL_SOURCE).not.toContain('Rotate your device')
+    expect(SHELL_SOURCE).not.toContain('tk-rotate')
+  })
+
+  it('guards the device pixel ratio, which some WebViews report as zero', () => {
+    // Math.min(NaN, x) is NaN and a NaN-sized drawing buffer renders nothing.
+    expect(frameHead()).toContain('window.devicePixelRatio > 0 ? window.devicePixelRatio : 1')
+  })
+
+  it('feeds the simulation a coasting intent when the viewport cannot be laid out', () => {
+    // The overlay covers the controls; it does not disable them. Hiding an element
+    // is not input handling, which is precisely how the old rotate overlay let a
+    // tap on its own text press DRIFT.
+    expect(SHELL_SOURCE).toContain('if (metrics.fits) adapter.sample(')
+    expect(SHELL_SOURCE).toContain('else neutralIntent(')
+  })
+
+  it('stops pointer and key events reaching the race from the blocked overlay', () => {
+    const slice = between("blockedEl.className = 'tk-blocked tk-hidden'", 'const controlsEl')
+    expect(slice).toContain('stopPropagation')
+  })
+
+  it('reads the safe-area insets only when something can have moved a system bar', () => {
+    // A getComputedStyle read forces a style flush; per frame it would be a
+    // measurable cost for a value that changes a handful of times per session.
+    expect(SHELL_SOURCE).toContain('if (insetsDirty) {')
+    expect(frameHead()).not.toContain('getComputedStyle')
+    for (const kind of ['resize', 'orientationchange', 'fullscreenchange']) {
+      expect(SHELL_SOURCE).toContain(kind)
+    }
+  })
+})
+
+describe('the menu UI scales with the same metric as the race controls', () => {
+  it('writes --tk-ui-scale, and only when it changes', () => {
+    // The CSS consumes it with a fallback of 1, so a shell that never writes it
+    // degrades SILENTLY to phone-sized buttons on a tablet -- nothing throws and
+    // nothing looks broken in a screenshot at one size.
+    expect(SHELL_SOURCE).toContain("root.style.setProperty('--tk-ui-scale'")
+    expect(SHELL_SOURCE).toContain('metrics.buttonPx !== lastUiScaleButtonPx')
+  })
+})
+
+describe('fullscreen is asked for from a gesture, and only from a gesture', () => {
+  it('routes every menu control through the gate', () => {
+    // `button()` is the single choke point for HOST/JOIN/SOLO/START/BACK, the
+    // character buttons, READY, QUIT and the settings rows. Its click handler is
+    // the one place in the shell that runs with transient user activation.
+    expect(between('function button(', 'return b')).toContain("noteGesture('gesture')")
+  })
+
+  it('never requests fullscreen from a lifecycle or invite path', () => {
+    // User activation does not survive a navigation, so requesting on arrival
+    // rejects 100% of the time -- and on iOS the rejection is a synchronous
+    // TypeError inside whatever handler asked.
+    const code = SHELL_SOURCE.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+    for (const m of code.matchAll(/display\.request\(\)/g)) {
+      const before = code.slice(Math.max(0, m.index - 400), m.index)
+      expect(before, 'display.request() outside the gesture reducer').toContain('next.ask')
+    }
+    expect(code).not.toMatch(/pendingInvite[\s\S]{0,200}display\.request/)
+  })
+
+  it('re-reads the safe area when fullscreen changes, and unhooks on stop', () => {
+    // Entering fullscreen removes a system bar: same viewport reported, different
+    // usable area. Without the re-read the controls stay inset for a bar that is
+    // no longer there.
+    // NOT a between() slice: the callback contains `})` in `{ kind: ev }).gate`,
+    // so the naive end marker cuts the body off before the line under test and
+    // the assertion fails for a reason that has nothing to do with the shell.
+    expect(SHELL_SOURCE).toMatch(
+      /const offFullscreen = display\.onChange\([\s\S]{0,400}?insetsDirty = true/,
+    )
+    expect(SHELL_SOURCE).toContain('offFullscreen()')
+  })
+})

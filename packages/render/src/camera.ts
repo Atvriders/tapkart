@@ -119,3 +119,108 @@ export function updateCamera(
   cam.lookAt.y = target.position.y
   cam.lookAt.z = target.position.z + Math.sin(yaw) * lookAhead
 }
+
+// ---------------------------------------------------------------------------------
+// Projection policy (D2). `PerspectiveCamera.fov` is VERTICAL, so holding it fixed is
+// Hor+: the horizontal field of view runs free with the viewport's aspect. Across the
+// shapes this game actually ships on that is a 3.7x spread — 31 degrees of horizontal
+// on a portrait phone against 114 on a folded cover screen — and since `bolt` reflects
+// off track edges and `seeker` homes, how much road is off-axis is competitive
+// information, not taste.
+//
+// The band is SOFT, and that is not a stylistic preference. The boost kick is
+// `fovBoostDegrees` ADDED to the base and arrives here already summed, so a hard
+// ceiling would map the base and the boosted value onto the same number on any wide
+// screen — deleting the kick outright while every existing camera test stayed green,
+// because they all assert `cam.fovDegrees` upstream of this function. A strictly
+// increasing map cannot do that: distinct inputs stay distinct, forever.
+// ---------------------------------------------------------------------------------
+
+const DEG_TO_RAD = Math.PI / 180
+const RAD_TO_DEG = 180 / Math.PI
+
+/**
+ * The knees and asymptotes of the two soft bands, in degrees. POLICY, not physics
+ * (D2 §13): 16:9 and 16:10 sit inside the horizontal band on purpose, so the reference
+ * phone and the 1280x720 e2e viewport are left bit-for-bit alone, and every other shape
+ * is eased toward them. `*Floor`/`*Ceil` are asymptotes the band approaches and never
+ * reaches, `*LowKnee`/`*HighKnee` are where it stops being the identity.
+ */
+export const PROJECTION_BAND = Object.freeze({
+  hLowKnee: 86,
+  hFloor: 70,
+  hHighKnee: 94,
+  hCeil: 106,
+  vLowKnee: 52,
+  vFloor: 40,
+  vHighKnee: 72,
+  vCeil: 86,
+})
+
+/**
+ * `x` unchanged on `[lowKnee, highKnee]`; outside it, an exponential ease that
+ * approaches `ceil` (or `floor`) without ever arriving. C1 at both knees — the
+ * exponential's derivative there is exactly 1, which is the identity's — and STRICTLY
+ * increasing on the whole real line, so no two inputs can collide on one output.
+ *
+ * Exported because that last property is the entire point of the design and has to be
+ * assertable on the primitive itself: the composite below is bounded through two of
+ * these plus a pair of tangent round trips, which hides which half is doing the work.
+ */
+export function softBand(
+  x: number,
+  lowKnee: number,
+  floor: number,
+  highKnee: number,
+  ceil: number,
+): number {
+  if (x > highKnee) {
+    const span = ceil - highKnee
+    return highKnee + span * (1 - Math.exp(-(x - highKnee) / span))
+  }
+  if (x < lowKnee) {
+    const span = lowKnee - floor
+    return lowKnee - span * (1 - Math.exp(-(lowKnee - x) / span))
+  }
+  return x
+}
+
+/**
+ * The vertical fov to hand the projection, given the authored vertical fov (base plus
+ * boost, already summed by `updateCamera`) and the viewport aspect.
+ *
+ * Vertical in, vertical out: the chase camera is pitched down only atan(3/15) = 11.3
+ * degrees, so vertical fov is mostly sky headroom, while browser fullscreen (which
+ * changes viewport HEIGHT, not width) would make a fixed-horizontal regime jump the
+ * visible road ahead on every toggle.
+ *
+ * Strictly monotone in `verticalFovDegrees` at fixed `aspect`, and the horizontal it
+ * implies is strictly monotone in `aspect` at fixed `verticalFovDegrees`. Both are
+ * load-bearing: the first keeps the boost kick, the second keeps "a wider screen shows
+ * more" true.
+ */
+export function projectionFovDegrees(verticalFovDegrees: number, aspect: number): number {
+  const naturalH =
+    2 * Math.atan(aspect * Math.tan(verticalFovDegrees * DEG_TO_RAD * 0.5)) * RAD_TO_DEG
+  const bandedH = softBand(
+    naturalH,
+    PROJECTION_BAND.hLowKnee,
+    PROJECTION_BAND.hFloor,
+    PROJECTION_BAND.hHighKnee,
+    PROJECTION_BAND.hCeil,
+  )
+  // The tangent round trip is not exact in binary floating point, so an unconditional
+  // `naturalH -> bandedH -> vertical` would return 61.99999999999999 for a shape the
+  // band did not touch at all. Inside the band the answer IS the input, so say so.
+  const impliedV =
+    bandedH === naturalH
+      ? verticalFovDegrees
+      : 2 * Math.atan(Math.tan(bandedH * DEG_TO_RAD * 0.5) / aspect) * RAD_TO_DEG
+  return softBand(
+    impliedV,
+    PROJECTION_BAND.vLowKnee,
+    PROJECTION_BAND.vFloor,
+    PROJECTION_BAND.vHighKnee,
+    PROJECTION_BAND.vCeil,
+  )
+}

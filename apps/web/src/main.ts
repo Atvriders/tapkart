@@ -1,7 +1,8 @@
 // The composition root: game decisions stay in packages/game while browser,
 // PWA, audio and Capacitor lifecycles meet here.
 import { parseInviteUri, type InviteSource, type NfcHost } from '@tapkart/invite'
-import { realFrameClock } from '@tapkart/game'
+import type { DisplayHost } from '@tapkart/game'
+import { nullDisplayHost, realFrameClock } from '@tapkart/game'
 import { startShell } from '@tapkart/game/shell'
 import { nullAudioBackend } from '@tapkart/render'
 import { DEFAULT_THREE_OPTIONS, createThreeRenderer } from '@tapkart/render/three'
@@ -11,9 +12,10 @@ import {
   INSTALL_DISMISS_COOLDOWN_MS,
   reduceInstall,
 } from './pwa/install'
+import { createDisplayHost } from './platform/fullscreen'
 import { createUpdateState, reduceUpdate } from './pwa/update'
 import { installAudioGate } from './platform/audio'
-import { appOrigin } from './platform/env'
+import { IS_NATIVE, appOrigin } from './platform/env'
 import { capacitorNfcHost } from './platform/nfc'
 import { installPageLifecycle } from './platform/page-lifecycle'
 
@@ -64,6 +66,18 @@ const nfc: NfcHost = {
     return parseInviteUri(href) === null ? null : href
   },
 }
+
+/* --------------------------------------------------------- the DisplayHost */
+
+/**
+ * Fullscreen in the browser only. Inside the APK Capacitor's
+ * BridgeWebChromeClient answers onShowCustomView by immediately calling
+ * onCustomViewHidden, so an HTML fullscreen request is cancelled on the same
+ * tick; the native immersive mode hides the system bars there instead.
+ */
+const display: DisplayHost = IS_NATIVE
+  ? nullDisplayHost
+  : createDisplayHost(document, document)
 
 /* ------------------------------------------------------------- PWA state */
 
@@ -171,6 +185,7 @@ function startComposition(): { stop(): void } {
     renderer: createThreeRenderer(canvas, DEFAULT_THREE_OPTIONS),
     audio: nullAudioBackend,
     nfc,
+    display,
     origin: appOrigin(),
   })
 

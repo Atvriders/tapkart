@@ -384,3 +384,28 @@ export function qrModuleAt(m: QrMatrix, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= m.size || y >= m.size) return false
   return m.modules[y * m.size + x] === 1
 }
+
+/**
+ * How large to draw a QR code of `modules` modules on a screen whose short edge
+ * is `shortEdgePx`, at device pixel ratio `dpr`.
+ *
+ * Pure, because the two ways this goes wrong are both silent. A fixed 320 px
+ * target overflows the invite panel on a 320 px-wide phone -- `overflow: hidden`
+ * then clips the code, and a clipped QR does not report an error, it simply never
+ * scans. And setting the backing store to the same number as the CSS size renders
+ * at 1x on a 3x screen, which is a soft, hard-to-scan code at any size.
+ *
+ * `cssScale` is the integer module size in CSS px; `backingScale` is the module
+ * size in device px. Both are integers: a fractional module size lands module
+ * edges mid-pixel, which is exactly the blur a scanner fails on.
+ */
+export function qrCanvasScale(
+  modules: number,
+  shortEdgePx: number,
+  dpr: number,
+): { cssScale: number; backingScale: number } {
+  const targetCss = Math.min(360, Math.max(160, shortEdgePx - 96))
+  const cssScale = Math.max(2, Math.floor(targetCss / modules))
+  const ratio = Math.max(1, Math.min(dpr > 0 ? dpr : 1, 3))
+  return { cssScale, backingScale: cssScale * Math.round(ratio) }
+}

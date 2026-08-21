@@ -706,6 +706,67 @@ Because every scheme reduces to the same intent struct — the same one the bots
 and the netcode use — three schemes is three small adapters, not three control
 systems.
 
+*Amended 2026-08-21 (owner's decision): the game lays out for every viewport,
+not landscape only.* The paragraphs above describe a landscape screen, and the
+Plan 3 contract hardened that into a rule — R40, *"landscape only … portrait
+is not a supported state to lay out for"*, with Plan 5's PWA manifest
+`"orientation": "landscape"` named as a consequence of it. Three decisions
+replace that rule. They are recorded here rather than edited over the top of it,
+because R40 is load-bearing in the plan contracts and in shipped code comments,
+and a reader needs to see that it changed.
+
+- **D1 — every viewport is a layout; the rotate prompt is retired.** Portrait,
+  square, and every aspect between now get a real, laid-out, playable control
+  set: button size, gap, edge inset, the steering band and the thumb travel to
+  full lock all derive from the short edge of the viewport, instead of the fixed
+  88 px rectangles the original design assumed. R40 is superseded by **R51:
+  every viewport is a layout; the only refusal is a viewport too small to lay
+  out** — roughly under 165 CSS px on its short edge, which is a multi-window
+  sliver, not a phone. Three findings forced this. First, the lock was already
+  unenforceable on the devices in question: at `targetSdk 36`, Android 16
+  ignores `android:screenOrientation` on displays 600 dp wide or more, so a
+  tablet or an unfolded foldable could boot straight into the rotate overlay
+  above a canvas that had never been resized — a dead end with no way out.
+  Second, a browser guest arriving by tap has no orientation authority at all:
+  `screen.orientation.lock()` requires fullscreen, which requires a user gesture
+  that does not survive the navigation. Third, the overlay was never a pause —
+  the simulation kept running underneath it and the overlay did not stop pointer
+  events, so on a 390 × 844 phone a tap on the prompt text pressed DRIFT. The
+  refusal state that replaces it therefore gates the **simulation** (neutral
+  intent, kart coasts) rather than merely covering it.
+
+- **D2 — the camera keeps its fixed-vertical (Hor+) regime, and the horizontal
+  that regime implies is softly banded.** `PerspectiveCamera.fov` is vertical,
+  so with vertical pinned at 62° the horizontal ran from 31° on a portrait phone
+  to 114° on a folded cover screen — a 3.7× spread in how much track a player
+  can see. That is an information asymmetry, not a determinism problem: the sim
+  stays authoritative and aspect-blind, but hazards are static, bolts reflect off
+  the track edges, seekers home, and eight karts share a 15–26 m road. The
+  implied horizontal is now bent toward a band (46°–104° across those same
+  shapes), and the band is **asymptotic rather than a hard clamp**, because the
+  boost kick is +8° added to the authored vertical FOV and reaches the renderer
+  already summed — a hard ceiling would silently delete the boost on wide
+  screens with every existing camera test still green. Switching to
+  fixed-horizontal was rejected: the chase camera is pitched down only 11.3°,
+  so vertical FOV is sky headroom, and browser fullscreen changes viewport
+  *height* — under a fixed-horizontal regime every fullscreen toggle would jump
+  the visible road ahead. 16:9 and the 1280 × 720 test viewport are untouched.
+
+- **D3 — the orientation lock is removed everywhere, and no new lock replaces
+  it.** `android:screenOrientation="sensorLandscape"` is dropped from the Android
+  manifest, the web manifest's `"orientation"` becomes `"any"` (`"display":
+  "fullscreen"` is kept, which is what an installed copy should declare), and no
+  `screen.orientation.lock()` call is added anywhere — locking needs fullscreen,
+  which needs a gesture the invited guest does not have, and the platform would
+  ignore it on exactly the large screens this change exists for.
+
+The same change set answers the rest of that 2026-08-21 ask: the APK hides the
+Android system bars through the `SystemBars` configuration already shipped in
+`@capacitor/android`, and re-hides them on window focus; the browser build asks
+for fullscreen on the player's first menu tap, the earliest moment a browser
+will accept the request, and never re-asks after a deliberate exit. Neither is
+provable in this repository — both are items on the owner's checklist.
+
 ---
 
 ## 7. Content
@@ -761,8 +822,16 @@ Stated plainly rather than papered over:
 
 - How the game **feels** on a real phone.
 - The **NFC tap**. HCE requires two physical devices in contact.
+- *Added 2026-08-21 with the responsive change:* **anything that needs a screen
+  this repository has never had.** No Android device, no emulator, no foldable,
+  no tablet, no notched device, no iPhone, no real WebGL context in CI, and no
+  HTTPS lane for Playwright. CI can prove the layout arithmetic — hand-written
+  rectangles at eight viewports, plus the no-overlap and stays-on-screen
+  invariants — but not a hidden status bar, a fold survived mid-race, a cutout
+  cleared, or iOS Safari's missing Fullscreen API.
 
-Both are owner-verified.
+All three are owner-verified; the third is enumerated as items 16 through 29 of
+[`docs/owner-verification.md`](../../owner-verification.md).
 
 ---
 

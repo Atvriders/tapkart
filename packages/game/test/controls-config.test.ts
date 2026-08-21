@@ -1,13 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { MAX_POINTERS, createControlInputs } from '../src/controls/types'
 import {
-  DEFAULT_CONTROL_CONFIG,
-  TOUCH_BUTTON_SIZE_PX,
-  TOUCH_BUTTON_MARGIN_PX,
-  TOUCH_BUTTON_GAP_PX,
-  THUMBZONE_FULL_LOCK_FRACTION,
   BRAKE_HOLD_TICKS,
+  DEFAULT_CONTROL_CONFIG,
+  THUMBZONE_FULL_LOCK_FRACTION,
+  TOUCH_BUTTON_GAP_PX,
+  TOUCH_BUTTON_MARGIN_PX,
+  TOUCH_BUTTON_SIZE_PX,
   brakeButtonRect,
+  controlMetrics,
+  createControlMetrics,
   driftButtonRect,
   gasButtonRect,
   itemButtonRect,
@@ -23,7 +25,13 @@ import { makeControlInputsFixture } from './fixtures/game-fixtures'
 // same constants the implementation uses cannot detect a wrong layout.
 const W = 800
 const H = 400
+const NO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 }
+/** Derived from VIEWPORT, so these tests keep asserting the ORIGINAL Q24 numbers.
+ * That is the point: 800 x 400 is the calibration point at which the responsive
+ * derivation must reproduce the fixed layout it replaced, exactly. */
+const METRICS = createControlMetrics()
 const VIEWPORT = { width: W, height: H }
+controlMetrics(VIEWPORT, NO_INSETS, METRICS)
 
 function newRect(): Rect {
   return { x: 0, y: 0, w: 0, h: 0 }
@@ -100,7 +108,7 @@ describe('controls/config layout (Q24)', () => {
     // CATCHES: a rect measured from the top-left instead of the bottom-right, and
     // a margin applied to only one axis. Hard-coded expectations, not recomputed.
     const r = newRect()
-    driftButtonRect(VIEWPORT, r)
+    driftButtonRect(VIEWPORT, METRICS, r)
     expect(r).toEqual({ x: 696, y: 296, w: 88, h: 88 })
   })
 
@@ -108,11 +116,11 @@ describe('controls/config layout (Q24)', () => {
     // CATCHES: the item button placed beside (not above) the drift button, or
     // stacked with no gap - which would delete the dead space Q24 requires.
     const r = newRect()
-    itemButtonRect(VIEWPORT, r)
+    itemButtonRect(VIEWPORT, METRICS, r)
     expect(r).toEqual({ x: 696, y: 192, w: 88, h: 88 })
 
     const drift = newRect()
-    driftButtonRect(VIEWPORT, drift)
+    driftButtonRect(VIEWPORT, METRICS, drift)
     expect(drift.y - (r.y + r.h)).toBe(TOUCH_BUTTON_GAP_PX)
     expect(r.x).toBe(drift.x)
   })
@@ -121,9 +129,9 @@ describe('controls/config layout (Q24)', () => {
     const steering = newRect()
     const gas = newRect()
     const brake = newRect()
-    steeringZoneRect(VIEWPORT, steering)
-    gasButtonRect(VIEWPORT, gas)
-    brakeButtonRect(VIEWPORT, brake)
+    steeringZoneRect(VIEWPORT, METRICS, NO_INSETS, steering)
+    gasButtonRect(VIEWPORT, METRICS, gas)
+    brakeButtonRect(VIEWPORT, METRICS, brake)
 
     expect(steering).toEqual({ x: 0, y: 0, w: 400, h: 400 })
     expect(gas).toEqual({ x: 592, y: 296, w: 88, h: 88 })
@@ -137,7 +145,7 @@ describe('controls/config layout (Q24)', () => {
     // untouched - the frame path would then read a stale zero rect forever.
     const r = newRect()
     const same = r
-    driftButtonRect(VIEWPORT, r)
+    driftButtonRect(VIEWPORT, METRICS, r)
     expect(same.w).toBe(88)
   })
 
@@ -158,8 +166,8 @@ describe('controls/config layout (Q24)', () => {
     // The band is y in [280, 296) at the buttons' x range.
     const drift = newRect()
     const item = newRect()
-    driftButtonRect(VIEWPORT, drift)
-    itemButtonRect(VIEWPORT, item)
+    driftButtonRect(VIEWPORT, METRICS, drift)
+    itemButtonRect(VIEWPORT, METRICS, item)
     for (const y of [280, 285, 295.999]) {
       expect(rectContains(drift, 740, y)).toBe(false)
       expect(rectContains(item, 740, y)).toBe(false)

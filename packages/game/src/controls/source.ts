@@ -1,4 +1,4 @@
-import type { ControlInputs, InputSource, PointerPhase, TiltSample, Viewport } from './types'
+import type { ControlInputs, InputSource, Insets, PointerPhase, TiltSample, Viewport } from './types'
 import { MAX_POINTERS } from './types'
 
 /**
@@ -12,7 +12,11 @@ import { MAX_POINTERS } from './types'
  * `target` is the element the shell listens on; it passes `window` so that keys
  * and device orientation arrive alongside pointers.
  */
-export function attachInputSource(target: EventTarget, viewport: Viewport): InputSource {
+export function attachInputSource(
+  target: EventTarget,
+  viewport: Viewport,
+  insets: Insets,
+): InputSource {
   // Fixed-size accumulator, allocated once. A frame that produces more than
   // MAX_POINTERS events drops the excess rather than growing an array in the
   // input path (§7.3).
@@ -104,6 +108,13 @@ export function attachInputSource(target: EventTarget, viewport: Viewport): Inpu
       out.tilt = haveTilt ? tiltScratch : null
       out.viewport.width = viewport.width
       out.viewport.height = viewport.height
+      // Copied, not aliased, for the same reason `viewport` is: both objects stay
+      // caller-owned with the shell as their one writer, and the adapters read a
+      // value that cannot change underneath a single sample().
+      out.insets.top = insets.top
+      out.insets.right = insets.right
+      out.insets.bottom = insets.bottom
+      out.insets.left = insets.left
     },
 
     snapshotTilt(out: TiltSample): boolean {

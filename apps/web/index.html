@@ -27,15 +27,58 @@
       #tk-root { position: fixed; inset: 0; pointer-events: none; }
       #tk-root > * { pointer-events: auto; }
       .tk-hidden { display: none !important; }
+      /* Safe-area probe. The shell reads these four resolved paddings with a single
+         getComputedStyle call, only when a resize/orientationchange/fullscreenchange
+         marks them dirty, and feeds them to the pure layout as CSS px. The var() half
+         is not decoration: inside the APK, Capacitor's SystemBars plugin injects
+         --safe-area-inset-* onto the root element, and that is the reliable source
+         there; env() is the reliable source in a browser. max() takes whichever
+         actually reported a cutout. */
+      .tk-insets {
+        position: fixed; top: 0; left: 0; width: 0; height: 0;
+        visibility: hidden; pointer-events: none;
+        padding-top:    max(env(safe-area-inset-top, 0px),    var(--safe-area-inset-top, 0px));
+        padding-right:  max(env(safe-area-inset-right, 0px),  var(--safe-area-inset-right, 0px));
+        padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+        padding-left:   max(env(safe-area-inset-left, 0px),   var(--safe-area-inset-left, 0px));
+      }
       .tk-screen {
         position: absolute; inset: 0; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 16px;
-        background: rgba(11, 13, 18, 0.82); text-align: center; padding: 24px;
+        align-items: center; gap: 16px;
+        background: rgba(11, 13, 18, 0.82); text-align: center;
+        /* A menu screen is routinely TALLER than the viewport it lands in: at
+           844x390 the lobby stacks title + error + room code + a row of eight
+           characters + track select + settings + a QR + the player list + READY +
+           the actions row, which is far past 390px. Centring content that overflows
+           clips it SYMMETRICALLY, so START RACE ends up both invisible and
+           unreachable — no scrollbar, no clue. Start at the top and scroll; centring
+           comes back below once there is height worth centring in. */
+        justify-content: flex-start;
+        overflow-y: auto; overscroll-behavior: contain;
+        /* html/body set `touch-action: none` so a steering thumb is never stolen by
+           the scroller. That intersects down through descendants, so the scroll this
+           rule just enabled would be finger-dead without re-granting one axis here.
+           Menu screens are hidden during a race, so this cannot reach the controls. */
+        touch-action: pan-y;
+        padding:
+          max(24px, env(safe-area-inset-top))
+          max(24px, env(safe-area-inset-right))
+          max(24px, env(safe-area-inset-bottom))
+          max(24px, env(safe-area-inset-left));
       }
-      .tk-screen h1 { margin: 0; font-size: 40px; letter-spacing: 0.18em; }
+      @media (min-height: 560px) {
+        .tk-screen { justify-content: center; }
+      }
+      .tk-screen h1 { margin: 0; font-size: clamp(22px, 6vmin, 44px); letter-spacing: 0.18em; }
       .tk-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
       .tk-btn {
-        min-width: 120px; min-height: 56px; padding: 0 20px;
+        /* Hit targets track the same short-edge scale the touch controls use:
+           --tk-ui-scale is buttonPx/88, written once per layout change by the shell.
+           clamp() keeps a 44px floor (the accessibility minimum) on a cover screen
+           and stops a tablet growing thumb-sized menu buttons. */
+        min-width: clamp(96px, 26vmin, 150px);
+        min-height: clamp(44px, calc(46px * var(--tk-ui-scale, 1)), 64px);
+        padding: 0 20px;
         border: 1px solid #47506a; border-radius: 12px;
         background: #171b25; color: inherit; font: inherit; letter-spacing: 0.08em;
       }
@@ -51,8 +94,14 @@
       }
       .tk-settings-toggle { min-height: 40px; }
       .tk-settings[data-expanded="true"] {
-        position: absolute; z-index: 8; top: 12px; left: 12px; right: 12px;
-        max-height: calc(100% - 24px); overflow: auto; padding: 14px;
+        position: absolute; z-index: 8;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+        max-height: calc(
+          100% - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom))
+        );
+        overflow: auto; padding: 14px;
       }
       .tk-settings[data-expanded="true"] > .tk-settings-toggle { margin-bottom: 12px; }
       .tk-settings-content > .tk-row + .tk-row { margin-top: 12px; }
@@ -63,19 +112,37 @@
       .tk-settings input[type="range"] { min-height: 32px; padding: 0; }
       .tk-settings-note { margin: 12px 0 0; color: #b8d2ff; }
       .tk-lobby-players { margin: 0; padding-left: 24px; text-align: left; }
-      .tk-screen ol { text-align: left; font-size: 20px; line-height: 1.8; }
+      .tk-screen ol { text-align: left; font-size: clamp(15px, 3.2vmin, 20px); line-height: 1.8; }
+      /* The invite QR sizes itself from the short edge, but a panel can still be
+         narrower than the canvas it was handed; without this it is silently cropped
+         by the panel's overflow and the code will not scan, with no error anywhere. */
+      .tk-screen canvas { max-width: 100%; height: auto; }
       .tk-hud {
-        position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column;
+        /* targetSdk 36 forces edge-to-edge, so a fixed 16px put lap/position
+           underneath the status bar and behind a display cutout in landscape-left. */
+        position: absolute;
+        top: max(16px, env(safe-area-inset-top));
+        left: max(16px, env(safe-area-inset-left));
+        display: flex; flex-direction: column;
         z-index: 2; gap: 4px; font-variant-numeric: tabular-nums;
         text-shadow: 0 2px 6px #000; pointer-events: none;
       }
       .tk-hud .tk-countdown {
         position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-        font-size: 22vmin; font-weight: 700; letter-spacing: 0.05em; pointer-events: none;
+        /* Two declarations on purpose: engines without dynamic viewport units keep
+           the first, everything else takes the second. dvmin follows the retracting
+           mobile toolbar, so 3-2-1 does not resize under the player mid-count. */
+        font-size: 22vmin;
+        font-size: 22dvmin;
+        font-weight: 700; letter-spacing: 0.05em; pointer-events: none;
       }
-      .tk-rotate {
+      /* Replaces the retired "Rotate your device" overlay. Every orientation is now
+         a real layout; the only refusal left is a viewport too small to lay out at
+         all, and unlike that overlay this one swallows the input it covers. */
+      .tk-blocked {
         position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
         z-index: 20; background: #0b0d12; font-size: 24px; letter-spacing: 0.1em;
+        text-align: center; padding: 24px;
       }
       #tk-root > .tk-controls { pointer-events: none; }
       .tk-controls { position: absolute; inset: 0; z-index: 3; overflow: hidden; }

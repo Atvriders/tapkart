@@ -64,27 +64,24 @@ import {
 import { browserRtcFactory } from '@tapkart/net/webrtc-browser'
 import { browserWebSocket } from '@tapkart/net/websocket-browser'
 import { ROOM_CODE_LENGTH, normalizeRoomCode } from '@tapkart/protocol'
-import {
-  buildInviteUri,
-  buildQrMatrix,
-  nullNfcHost,
-  parseInviteUri,
-  qrModuleAt,
-  QR_QUIET_ZONE,
-  type NfcHost,
-} from '@tapkart/invite'
+import { QR_QUIET_ZONE, buildInviteUri, buildQrMatrix, nullNfcHost, parseInviteUri, qrCanvasScale, qrModuleAt, type NfcHost } from '@tapkart/invite'
 import type { FrameClock } from './clock'
 import { accumulatorAlpha } from './clock'
-import type { ControlAdapter, ControlInputs, TiltSample, Viewport } from './controls/types'
+import type { DisplayHost } from './display'
+import { createFullscreenGate, nullDisplayHost, reduceFullscreen } from './display'
+import type { ControlAdapter, ControlInputs, Insets, TiltSample, Viewport } from './controls/types'
 import { createControlInputs } from './controls/types'
-import type { ControlConfig, Rect } from './controls/config'
+import type { ControlConfig, ControlMetrics, Rect } from './controls/config'
 import {
   DEFAULT_CONTROL_CONFIG,
-  TOUCH_BUTTON_MARGIN_PX,
+  TOUCH_BUTTON_SIZE_PX,
   brakeButtonRect,
+  controlMetrics,
+  createControlMetrics,
   driftButtonRect,
   gasButtonRect,
   itemButtonRect,
+  neutralIntent,
   steeringZoneRect,
 } from './controls/config'
 import { makeControlAdapter } from './controls/index'
@@ -116,6 +113,9 @@ export interface ShellOptions {
   audio: AudioBackend // nullAudioBackend in v1 (Q26)
   /** Optional so browser and headless call sites remain inert. */
   nfc?: NfcHost
+  /** Fullscreen, when the platform offers it. Inert by default, and deliberately
+   * inert inside the APK, where native immersive mode does this instead. */
+  display?: DisplayHost
   /** Browser defaults to location.origin. Native passes the deployed HTTPS
    * origin for invites and networking instead of its capacitor:// asset origin. */
   origin?: string
@@ -238,11 +238,15 @@ function countFilled(order: readonly number[]): number {
 function drawQr(canvas: HTMLCanvasElement, text: string): void {
   const matrix = buildQrMatrix(text)
   const modules = matrix.size + QR_QUIET_ZONE * 2
-  const scale = Math.max(2, Math.floor(320 / modules))
-  canvas.width = modules * scale
-  canvas.height = modules * scale
-  canvas.style.width = `${canvas.width}px`
-  canvas.style.height = `${canvas.height}px`
+  const shortEdge = Math.min(window.innerWidth, window.innerHeight)
+  const { cssScale, backingScale } = qrCanvasScale(modules, shortEdge, window.devicePixelRatio)
+  // CSS size and backing-store size are deliberately different: the code is drawn
+  // at device resolution and displayed at layout resolution.
+  canvas.style.width = `${modules * cssScale}px`
+  canvas.style.height = `${modules * cssScale}px`
+  canvas.width = modules * backingScale
+  canvas.height = modules * backingScale
+  const scale = backingScale
 
   const ctx = canvas.getContext('2d')
   if (ctx === null) return
@@ -334,12 +338,45 @@ function welcomeError(message: WelcomeMessage): string {
  *    buildAudioModel -> activeAudio.apply -> session.swapViews.
  *
  *  Two things it does outside that loop: it calls activeAudio.setConfig on every
- *  Settings change and once at startup (R38 — never per frame), and it shows the
- *  rotate-your-device overlay while viewport.height > viewport.width (R40),
- *  skipping renderer.resize until the device is landscape again. */
+ *  Settings change and once at startup (R38 — never per frame), and it derives the
+ *  touch layout from the measured viewport and safe-area insets every frame,
+ *  resizing the renderer whenever size or device pixel ratio actually changes.
+ *
+ *  R40 (landscape only, rotate-your-device overlay, resize skipped in portrait) is
+ *  SUPERSEDED as of 2026-08-21 at the owner's request: every orientation and shape
+ *  lays out, because the devices this must run on — tablets and foldables — can
+ *  boot portrait and Android 16 ignores an activity's orientation lock on large
+ *  screens anyway, and because a guest arriving from an NFC tap lands in whatever
+ *  orientation they are holding, with no authority to change it. The only overlay
+ *  left is `tk-blocked`, for a viewport too small to lay out at all, and unlike
+ *  the one it replaces it neutralises input rather than merely covering it. */
 export function startShell(opts: ShellOptions): GameShell {
   const { canvas, root, clock, store, renderer } = opts
   const nfc: NfcHost = opts.nfc ?? nullNfcHost
+  const display: DisplayHost = opts.display ?? nullDisplayHost
+  let fullscreenGate = createFullscreenGate()
+  /**
+   * Fullscreen may only be requested from a real user gesture, so it is asked
+   * for HERE -- from the one handler every menu control already routes through --
+   * and nowhere else. A guest arriving from an NFC tap has no gesture at all on
+   * the way in (the tap happened in another app, and activation does not survive
+   * the navigation), so their first legal moment is the character button. That is
+   * why every screen before it must be laid out to work with browser chrome
+   * visible rather than assuming it can be hidden.
+   */
+  function noteGesture(kind: 'gesture' | 'explicitRequest'): void {
+    if (!display.supported()) return
+    const next = reduceFullscreen(fullscreenGate, { kind })
+    fullscreenGate = next.gate
+    if (next.ask) void display.request()
+  }
+  const offFullscreen = display.onChange(() => {
+    const ev = display.isFullscreen() ? 'entered' : 'left'
+    fullscreenGate = reduceFullscreen(fullscreenGate, { kind: ev }).gate
+    // A fullscreen change resizes the viewport and can uncover or cover a system
+    // bar, so the safe-area insets must be re-read rather than assumed.
+    insetsDirty = true
+  })
   const origin: string = opts.origin ?? window.location.origin
   let activeAudio = opts.audio
   // One allocation for every non-race transition. Reusing it also guarantees
@@ -362,9 +399,24 @@ export function startShell(opts: ShellOptions): GameShell {
   }
   const hudEl = document.createElement('div')
   hudEl.className = 'tk-hud'
-  const rotateEl = document.createElement('div')
-  rotateEl.className = 'tk-rotate'
-  rotateEl.textContent = 'Rotate your device'
+  // Measured, not guessed. Its padding resolves env(safe-area-inset-*) and the
+  // custom properties Capacitor's SystemBars plugin sets inside the APK, so one
+  // getComputedStyle read yields whatever that platform actually reserves.
+  const insetProbeEl = document.createElement('div')
+  insetProbeEl.className = 'tk-insets'
+  // Shown only when the viewport is genuinely too small to lay controls out --
+  // an absurd multi-window sliver, not a rotation. It carries screenEl's
+  // stopPropagation loop because an overlay that merely COVERS the controls
+  // disables nothing: the old rotate overlay did not, so a tap on its text
+  // landed on the drift button underneath and, held, also braked.
+  const blockedEl = document.createElement('div')
+  blockedEl.className = 'tk-blocked tk-hidden'
+  blockedEl.textContent = 'Make this window larger'
+  for (const kind of [
+    'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'keydown', 'keyup',
+  ]) {
+    blockedEl.addEventListener(kind, (event) => event.stopPropagation())
+  }
 
   // A visual map of the exact pure hit geometry. It never receives race input:
   // pointer events pass through to the canvas/window source, except for QUIT,
@@ -405,7 +457,7 @@ export function startShell(opts: ShellOptions): GameShell {
     brakeControlEl,
     raceQuitEl,
   )
-  root.append(screenEl, hudEl, controlsEl, rotateEl)
+  root.append(screenEl, hudEl, controlsEl, blockedEl, insetProbeEl)
 
   let settings = loadSettings(store)
   let app: AppState = createAppState(settings)
@@ -413,7 +465,25 @@ export function startShell(opts: ShellOptions): GameShell {
   activeAudio.setConfig({ masterGain: settings.audioVolume, enabled: settings.audioEnabled })
 
   const viewport: Viewport = { width: window.innerWidth, height: window.innerHeight }
-  const inputSource = attachInputSource(window, viewport)
+  const insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 }
+  const metrics: ControlMetrics = createControlMetrics()
+  // Reading the probe costs a forced style flush, so it happens only when
+  // something that can move a system bar has fired -- never per frame. The size
+  // poll below stays per-frame: it is free, and it is what makes a fold, an
+  // unfold or a multi-window drag land within one frame with no listener at all.
+  let insetsDirty = true
+  const markInsetsDirty = (): void => { insetsDirty = true }
+  for (const kind of ['resize', 'orientationchange', 'fullscreenchange']) {
+    window.addEventListener(kind, markInsetsDirty)
+  }
+  function readInsets(): void {
+    const cs = window.getComputedStyle(insetProbeEl)
+    insets.top = Number.parseFloat(cs.paddingTop) || 0
+    insets.right = Number.parseFloat(cs.paddingRight) || 0
+    insets.bottom = Number.parseFloat(cs.paddingBottom) || 0
+    insets.left = Number.parseFloat(cs.paddingLeft) || 0
+  }
+  const inputSource = attachInputSource(window, viewport, insets)
   const calibrationSample: TiltSample = { alpha: 0, beta: 0, gamma: 0 }
   const rawInputs: ControlInputs = createControlInputs()
   const intent: Intent = {
@@ -448,8 +518,13 @@ export function startShell(opts: ShellOptions): GameShell {
   let settingsExpanded = false
   let tiltCalibrationPending = false
   let tiltPermissionRequest = 0
-  let controlsW = -1
-  let controlsH = -1
+  // Bumped whenever anything the layout depends on changes: size, dpr, or the
+  // safe-area insets. One counter replaces caching width and height separately,
+  // which could not see an inset change at constant size -- exactly what a
+  // status bar appearing or a fullscreen toggle does.
+  let layoutRevision = 0
+  let lastUiScaleButtonPx = -1
+  let controlsRevision = -1
   let controlsScheme: Settings['scheme'] | null = null
 
   const steerOverlayRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
@@ -465,25 +540,20 @@ export function startShell(opts: ShellOptions): GameShell {
     el.style.height = `${rect.h}px`
   }
 
-  function syncRaceControls(portrait: boolean): void {
-    const visible = app.screen === 'race' && !portrait
+  function syncRaceControls(): void {
+    const visible = app.screen === 'race'
     controlsEl.classList.toggle('tk-hidden', !visible)
     if (!visible) return
-    if (
-      controlsW === viewport.width &&
-      controlsH === viewport.height &&
-      controlsScheme === settings.scheme
-    ) return
+    if (controlsRevision === layoutRevision && controlsScheme === settings.scheme) return
 
-    controlsW = viewport.width
-    controlsH = viewport.height
+    controlsRevision = layoutRevision
     controlsScheme = settings.scheme
     controlsEl.setAttribute('data-scheme', settings.scheme)
-    steeringZoneRect(viewport, steerOverlayRect)
-    driftButtonRect(viewport, driftOverlayRect)
-    itemButtonRect(viewport, itemOverlayRect)
-    gasButtonRect(viewport, gasOverlayRect)
-    brakeButtonRect(viewport, brakeOverlayRect)
+    steeringZoneRect(viewport, metrics, insets, steerOverlayRect)
+    driftButtonRect(viewport, metrics, driftOverlayRect)
+    itemButtonRect(viewport, metrics, itemOverlayRect)
+    gasButtonRect(viewport, metrics, gasOverlayRect)
+    brakeButtonRect(viewport, metrics, brakeOverlayRect)
     placeControl(steerGuideEl, steerOverlayRect)
     placeControl(driftControlEl, driftOverlayRect)
     placeControl(itemControlEl, itemOverlayRect)
@@ -497,8 +567,8 @@ export function startShell(opts: ShellOptions): GameShell {
     const pedals = settings.scheme === 'virtualStick'
     gasControlEl.classList.toggle('tk-hidden', !pedals)
     brakeControlEl.classList.toggle('tk-hidden', !pedals)
-    raceQuitEl.style.top = `${TOUCH_BUTTON_MARGIN_PX}px`
-    raceQuitEl.style.right = `${TOUCH_BUTTON_MARGIN_PX}px`
+    raceQuitEl.style.top = `${metrics.insetPx + insets.top}px`
+    raceQuitEl.style.right = `${metrics.insetPx + insets.right}px`
   }
 
   function reconcileReader(): void {
@@ -770,7 +840,10 @@ export function startShell(opts: ShellOptions): GameShell {
     b.className = 'tk-btn'
     b.textContent = label
     if (testId !== undefined) b.setAttribute('data-testid', testId)
-    b.addEventListener('click', onClick)
+    b.addEventListener('click', () => {
+      noteGesture('gesture')
+      onClick()
+    })
     return b
   }
 
@@ -830,7 +903,7 @@ export function startShell(opts: ShellOptions): GameShell {
       disposeInvitePanel()
     }
     screenEl.replaceChildren()
-    syncRaceControls(viewport.height > viewport.width)
+    syncRaceControls()
     if (app.screen === 'race') {
       screenEl.classList.add('tk-hidden')
       return
@@ -1167,21 +1240,41 @@ export function startShell(opts: ShellOptions): GameShell {
 
     viewport.width = canvas.clientWidth > 0 ? canvas.clientWidth : window.innerWidth
     viewport.height = canvas.clientHeight > 0 ? canvas.clientHeight : window.innerHeight
-    // R40: landscape only. Q24's layout — 88 px buttons on fixed insets, left
-    // half steering — has no portrait meaning, so portrait is not a state to lay
-    // out for. The canvas is not resized until the device is landscape again.
-    const portrait = viewport.height > viewport.width
-    rotateEl.classList.toggle('tk-hidden', !portrait)
-    syncRaceControls(portrait)
-    if (!portrait) {
-      const dpr = window.devicePixelRatio
-      if (viewport.width !== lastW || viewport.height !== lastH || dpr !== lastDpr) {
-        lastW = viewport.width
-        lastH = viewport.height
-        lastDpr = dpr
-        renderer.resize(viewport.width, viewport.height, dpr)
-      }
+    if (insetsDirty) {
+      readInsets()
+      insetsDirty = false
+      layoutRevision++
     }
+    // Every shape lays out. There is no orientation gate: the old one left a
+    // portrait tablet on a permanent overlay above a canvas that was never
+    // resized, with no way out, while the race underneath ran on regardless.
+    controlMetrics(viewport, insets, metrics)
+
+    // Guarded because some WebViews report 0 and Math.min(NaN, x) is NaN, either
+    // of which sizes the drawing buffer to nothing.
+    const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
+    if (viewport.width !== lastW || viewport.height !== lastH || dpr !== lastDpr) {
+      lastW = viewport.width
+      lastH = viewport.height
+      lastDpr = dpr
+      renderer.resize(viewport.width, viewport.height, dpr)
+      // A steering origin latched in the old geometry means nothing in the new
+      // one: unfolding mid-corner would otherwise divide the old offset by a
+      // wider full-lock and swerve. Edge-triggered, so a URL-bar animation does
+      // not drop a held drift every frame.
+      adapter.reset()
+      layoutRevision++
+    }
+    blockedEl.classList.toggle('tk-hidden', metrics.fits)
+    // The menu buttons scale with the same derived metric the race controls use,
+    // so a tablet does not get phone-sized touch targets. Written only when it
+    // changes: setting a custom property invalidates style for the whole subtree,
+    // which is not something to do sixty times a second for a constant.
+    if (metrics.buttonPx !== lastUiScaleButtonPx) {
+      lastUiScaleButtonPx = metrics.buttonPx
+      root.style.setProperty('--tk-ui-scale', String(metrics.buttonPx / TOUCH_BUTTON_SIZE_PX))
+    }
+    syncRaceControls()
 
     inputSource.drain(rawInputs)
     const nowMs = clock.nowMs()
@@ -1195,7 +1288,11 @@ export function startShell(opts: ShellOptions): GameShell {
     if (r === null) return
 
     for (let i = 0; i < ticks; i++) {
-      adapter.sample(rawInputs, r.session.state().tick + 1, intent)
+      // The blocked overlay COVERS the controls; it does not disable them. The
+      // simulation must be fed a coasting intent, or a latch held from before the
+      // viewport shrank keeps steering a kart the player can no longer see.
+      if (metrics.fits) adapter.sample(rawInputs, r.session.state().tick + 1, intent)
+      else neutralIntent(r.session.state().tick + 1, intent)
       r.session.tickOnce(intent)
       if (i < ticks - 1) {
         // ClientLoop's correction delta describes only its most recent tick.
@@ -1259,6 +1356,7 @@ export function startShell(opts: ShellOptions): GameShell {
       void nfc.stopReader().catch(() => undefined)
       disposeInvitePanel()
       offInvite()
+      offFullscreen()
       if (race === null) silenceAudio()
       endRace()
       closeMultiplayer()
@@ -1267,7 +1365,8 @@ export function startShell(opts: ShellOptions): GameShell {
       screenEl.remove()
       hudEl.remove()
       controlsEl.remove()
-      rotateEl.remove()
+      blockedEl.remove()
+    insetProbeEl.remove()
     },
     setAudio(next: AudioBackend): void {
       if (!running) {

@@ -39,6 +39,7 @@ import type { Vec3 } from '@tapkart/sim'
 import type { PaletteRGB, TrackTheme } from '@tapkart/content'
 
 import type { RendererBackend, RendererStats } from '../backend'
+import { DEFAULT_CAMERA_PARAMS, projectionFovDegrees } from '../camera'
 import type { KartDraw, RenderFrame } from '../frame'
 import { ROAD_DECAL_LIFT, meshCounts } from '../mesh'
 import type { EdgeMarkerPlacement, MarkerPlacement, MeshData, TrackScene } from '../mesh'
@@ -93,7 +94,34 @@ export function createThreeRenderer(
   renderer.autoClear = false
 
   const scene = new Scene()
-  const camera = new PerspectiveCamera(62, 1, 0.3, 900)
+  // Constructed FROM the params, not from four literals that happened to match them
+  // once: `CameraParams.near`/`.far` are asserted by camera.test.ts and were read by
+  // nothing, so editing them moved no pixel.
+  const camera = new PerspectiveCamera(
+    DEFAULT_CAMERA_PARAMS.fovDegrees,
+    1,
+    DEFAULT_CAMERA_PARAMS.near,
+    DEFAULT_CAMERA_PARAMS.far,
+  )
+
+  // Projection state (D2). `camera.fov` is the SOLVED fov, which is not the fov the
+  // frame asked for, so it cannot also be the dirty flag: comparing `camera.fov` with
+  // `frame.camera.fovDegrees` made the guard permanently true the moment the two
+  // diverged — an `updateProjectionMatrix()` every frame forever — and the next frame
+  // clobbered whatever `resize` had solved. Track the request and the application
+  // separately instead, and let `applyProjection` be the sole writer of `camera.fov`.
+  let aspect = 1
+  let requestedFov = DEFAULT_CAMERA_PARAMS.fovDegrees
+  let appliedFov = Number.NaN
+
+  function applyProjection(): void {
+    const solved = projectionFovDegrees(requestedFov, aspect)
+    if (solved === appliedFov) return
+    appliedFov = solved
+    camera.fov = solved
+    camera.updateProjectionMatrix()
+  }
+
   const ambient = new AmbientLight(0xffffff, 0.6)
   const sun = new DirectionalLight(0xffffff, 1.1)
   scene.add(ambient)
@@ -381,9 +409,9 @@ export function createThreeRenderer(
       camera.up.set(frame.camera.up.x, frame.camera.up.y, frame.camera.up.z)
       scratchVector.set(frame.camera.lookAt.x, frame.camera.lookAt.y, frame.camera.lookAt.z)
       camera.lookAt(scratchVector)
-      if (camera.fov !== frame.camera.fovDegrees) {
-        camera.fov = frame.camera.fovDegrees
-        camera.updateProjectionMatrix()
+      if (frame.camera.fovDegrees !== requestedFov) {
+        requestedFov = frame.camera.fovDegrees
+        applyProjection()
       }
 
       for (let i = 0; i < MAX_KARTS; i++) applyKart(i, frame.karts[i])
@@ -432,7 +460,13 @@ export function createThreeRenderer(
       renderer.setPixelRatio(Math.min(devicePixelRatio, opts.maxPixelRatio))
       renderer.setSize(w, h, false)     // the shell owns CSS sizing, not the renderer
       camera.aspect = w / h
-      camera.updateProjectionMatrix()
+      aspect = w / h
+      // The solved fov depends on the aspect, so a new aspect invalidates the cache
+      // even when the requested fov has not moved. NaN never equals anything, so this
+      // also guarantees the `updateProjectionMatrix()` the new aspect needs — which is
+      // why there is no separate call here any more.
+      appliedFov = Number.NaN
+      applyProjection()
     },
 
     stats(): RendererStats {

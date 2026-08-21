@@ -12,14 +12,20 @@ export function installAudioGate(onReady: (ctx: AudioContext) => void): AudioGat
   let published = false
 
   function disarm(): void {
-    window.removeEventListener('pointerdown', fire)
-    window.removeEventListener('keydown', fire)
+    window.removeEventListener('pointerdown', fire, true)
+    window.removeEventListener('keydown', fire, true)
   }
 
   function arm(): void {
     if (disposed || published || resuming) return
-    window.addEventListener('pointerdown', fire, { once: true })
-    window.addEventListener('keydown', fire, { once: true })
+    // CAPTURE, not bubble. The menu overlay covers the whole viewport on every
+    // non-race screen and calls stopPropagation() on exactly these two events to
+    // keep a tap on START from becoming the first steering pointer of the race.
+    // In the bubble phase that also cancelled the audio unlock, so WebAudio did
+    // not resume until the player was already racing -- the countdown was silent
+    // on a cold start. Capture runs first, and stopPropagation cannot reach it.
+    window.addEventListener('pointerdown', fire, { once: true, capture: true })
+    window.addEventListener('keydown', fire, { once: true, capture: true })
   }
 
   const gate: AudioGate = {

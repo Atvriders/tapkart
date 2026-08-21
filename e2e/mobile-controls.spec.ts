@@ -87,11 +87,12 @@ test('mobile race affordances match pure geometry, switch schemes, rotate, and q
   expect(await box(page.locator('[data-control="steer"]'))).toEqual({
     x: 0, y: 0, width: 422, height: 390,
   })
+  // Derived from the 390 px short edge: 390 * 0.22 -> 86, gap 16, inset 16.
   expect(await box(page.locator('[data-control="drift"]'))).toEqual({
-    x: 740, y: 286, width: 88, height: 88,
+    x: 742, y: 288, width: 86, height: 86,
   })
   expect(await box(page.locator('[data-control="item"]'))).toEqual({
-    x: 740, y: 182, width: 88, height: 88,
+    x: 742, y: 186, width: 86, height: 86,
   })
   await expect(page.locator('[data-control="gas"]')).toBeHidden()
   await expect(page.locator('[data-control="brake"]')).toBeHidden()
@@ -110,17 +111,39 @@ test('mobile race affordances match pure geometry, switch schemes, rotate, and q
   await startSolo(page)
   await expect(overlay).toHaveAttribute('data-scheme', 'virtualStick')
   expect(await box(page.locator('[data-control="gas"]'))).toEqual({
-    x: 636, y: 286, width: 88, height: 88,
+    x: 640, y: 288, width: 86, height: 86,
   })
   expect(await box(page.locator('[data-control="brake"]'))).toEqual({
-    x: 636, y: 182, width: 88, height: 88,
+    x: 640, y: 186, width: 86, height: 86,
   })
   await expect(page.locator('[data-control="gas"]')).toHaveText('GAS')
   await expect(page.locator('[data-control="brake"]')).toHaveText('BRAKE')
 
+  // Portrait used to show "Rotate your device" over a canvas that was never
+  // resized. It is now a real layout: the controls stay up, and they MOVE --
+  // steering becomes a thumb-reachable band across the bottom instead of a
+  // full-height left half that would sit under the player's palm.
+  // Clicking any menu button enters fullscreen (that is the feature), and a
+  // fullscreen window cannot be resized -- setViewportSize fails with
+  // "To resize minimized/maximized/fullscreen window, restore it first". Leave
+  // it the way a player would before changing the window shape.
+  await page.evaluate(async () => { await document.exitFullscreen?.().catch(() => undefined) })
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true)
+
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByText('Rotate your device', { exact: true })).toBeVisible()
-  await expect(overlay).toBeHidden()
+  await expect(page.getByText('Rotate your device', { exact: true })).toHaveCount(0)
+  await expect(overlay).toBeVisible()
+  expect(await box(page.locator('[data-control="steer"]'))).toEqual({
+    x: 0, y: 591, width: 170, height: 253,
+  })
+  expect(await box(page.locator('[data-control="gas"]'))).toEqual({
+    x: 186, y: 742, width: 86, height: 86,
+  })
+  // The invariant the old fixed layout broke: steering must not reach under the
+  // pedals, which test them first and would silently swallow it.
+  const steer = await box(page.locator('[data-control="steer"]'))
+  const gas = await box(page.locator('[data-control="gas"]'))
+  expect(steer.x + steer.width).toBeLessThanOrEqual(gas.x)
 })
 
 test('tilt requires a real calibration sample and persists calibration and inversion', async ({ page }) => {

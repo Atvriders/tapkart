@@ -77,18 +77,41 @@ if (!existsSync(swPath)) {
   )
 }
 
+// The two manifest values that decide what an *installed* Tapkart can do, as one
+// self-contained function of its argument: no closure captures, no imports.
+// `apps/web/test/manifest.test.ts` slices this declaration out of this file and executes
+// it, so the rule the build enforces and the rule the suite proves are literally the same
+// source text instead of two copies free to drift apart. Keep it self-contained.
+function assertManifestContract(webManifest) {
+  // R51 (superseding R40): every viewport is a layout, so the installed app must not lock
+  // an orientation. This guard used to demand 'landscape' and is inverted rather than
+  // deleted, because Android 16 ignores an orientation lock on large screens anyway — a
+  // silent revert would only strand an installed tablet or unfolded foldable on a layout
+  // it can never rotate out of, with nothing failing anywhere.
+  if (webManifest.orientation !== 'any') {
+    throw new Error(
+      `build-sw: manifest orientation is '${webManifest.orientation}', not 'any'. Every viewport ` +
+        'is a supported layout now, so the installed app must not pin one.',
+    )
+  }
+  // The installed app gets its chrome-free viewport from this field alone: 'standalone'
+  // still leaves the platform status bar over the canvas, and there is no Fullscreen API
+  // call to fall back on inside the APK (Capacitor cancels onShowCustomView immediately).
+  if (webManifest.display !== 'fullscreen') {
+    throw new Error(
+      `build-sw: manifest display is '${webManifest.display}', not 'fullscreen'. The installed ` +
+        'app has no other way to reach a chrome-free viewport.',
+    )
+  }
+}
+
 const webManifest = JSON.parse(readFileSync(join(DIST, 'manifest.webmanifest'), 'utf8'))
 for (const field of ['name', 'start_url', 'scope', 'display', 'orientation', 'icons']) {
   if (webManifest[field] === undefined) {
     throw new Error(`build-sw: manifest.webmanifest has no '${field}'`)
   }
 }
-if (webManifest.orientation !== 'landscape') {
-  throw new Error(
-    `build-sw: manifest orientation is '${webManifest.orientation}', not 'landscape'. Plan 3's ` +
-      'orientation contract makes this a consequence of the game being landscape only.',
-  )
-}
+assertManifestContract(webManifest)
 if (!Array.isArray(webManifest.icons) || webManifest.icons.length === 0) {
   throw new Error('build-sw: manifest.webmanifest declares no icons')
 }

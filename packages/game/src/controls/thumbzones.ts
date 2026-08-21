@@ -1,15 +1,8 @@
 import type { Intent } from '@tapkart/sim'
 import { DRIFT_STEER_MIN, clamp, lerp } from '@tapkart/sim'
-import type { ControlAdapter, ControlInputs, Viewport } from './types'
-import type { ControlConfig, Rect } from './config'
-import {
-  BRAKE_HOLD_TICKS,
-  THUMBZONE_FULL_LOCK_FRACTION,
-  driftButtonRect,
-  itemButtonRect,
-  rectContains,
-  steeringZoneRect,
-} from './config'
+import type { ControlAdapter, ControlInputs } from './types'
+import type { ControlConfig, ControlMetrics, Rect } from './config'
+import { BRAKE_HOLD_TICKS, controlMetrics, createControlMetrics, driftButtonRect, itemButtonRect, rectContains, steeringZoneRect } from './config'
 
 /**
  * Auto-accelerate + thumb zones (spec §6, the default scheme).
@@ -32,6 +25,7 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
   const driftRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const itemRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
   const steeringRect: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  const metrics: ControlMetrics = createControlMetrics()
 
   let steerId = -1
   let driftId = -1
@@ -41,9 +35,9 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
   let driftHeldTicks = 0
   let steer = 0
 
-  function steerAxis(v: Viewport): number {
+  function steerAxis(m: ControlMetrics): number {
     if (steerId === -1) return 0
-    const lockPx = v.width * 0.5 * THUMBZONE_FULL_LOCK_FRACTION
+    const lockPx = m.fullLockPx
     if (!(lockPx > 0)) return 0 // pre-measure frame: no viewport, no steering, no NaN
     return clamp((currentX - originX) / lockPx, -1, 1)
   }
@@ -52,9 +46,10 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
     scheme: 'thumbZones',
 
     sample(raw: ControlInputs, tick: number, out: Intent): void {
-      driftButtonRect(raw.viewport, driftRect)
-      itemButtonRect(raw.viewport, itemRect)
-      steeringZoneRect(raw.viewport, steeringRect)
+      controlMetrics(raw.viewport, raw.insets, metrics)
+      driftButtonRect(raw.viewport, metrics, driftRect)
+      itemButtonRect(raw.viewport, metrics, itemRect)
+      steeringZoneRect(raw.viewport, metrics, raw.insets, steeringRect)
 
       let itemPulse = false
 
@@ -85,7 +80,7 @@ export function makeThumbZonesAdapter(cfg: ControlConfig): ControlAdapter {
         }
       }
 
-      let axis = steerAxis(raw.viewport)
+      let axis = steerAxis(metrics)
       if (Math.abs(axis) < cfg.deadZone) axis = 0
       const target = clamp(axis * cfg.steerGain, -1, 1)
       steer = clamp(lerp(steer, target, cfg.steerSmoothingPerTick), -1, 1)

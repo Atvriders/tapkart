@@ -6,7 +6,14 @@ import { describe, expect, it } from 'vitest'
 import { ITEM_BOOST_TICKS, wrapAngle } from '@tapkart/sim'
 
 import type { CameraState } from '../src/camera'
-import { DEFAULT_CAMERA_PARAMS, createCameraState, updateCamera } from '../src/camera'
+import {
+  DEFAULT_CAMERA_PARAMS,
+  PROJECTION_BAND,
+  createCameraState,
+  projectionFovDegrees,
+  softBand,
+  updateCamera,
+} from '../src/camera'
 // The barrel, to prove §4.11's new `export * from './camera'` line is actually there.
 import * as barrel from '../src/index'
 import type {
@@ -657,5 +664,187 @@ describe('the @tapkart/render barrel re-exports camera (§4.11)', () => {
     expect(throughBarrel.mode).toBe('countdown')
     expect(throughBarrel.state.mode).toBe('chase')
     expect(throughBarrel.params.distance).toBe(7)
+  })
+})
+
+/**
+ * D2's aspect band. Every number below is HAND-WRITTEN, never recomputed from
+ * `PROJECTION_BAND` or from the implementation's own composition — a test that rebuilt
+ * the formula would agree with any formula, including a hard clamp.
+ *
+ * `horizontalFov` is the perspective relation itself, not a copy of anything in src:
+ * three.js builds its frustum as `height = 2*near*tan(fov/2)`, `width = aspect*height`,
+ * so the horizontal half-angle is `atan(aspect * tan(vFov/2))`. That is the definition
+ * of what `PerspectiveCamera.fov` being VERTICAL means, and it is the quantity D2 is
+ * actually banding.
+ */
+function horizontalFov(verticalFovDegrees: number, aspect: number): number {
+  const halfV = ((verticalFovDegrees / 2) * Math.PI) / 180
+  return (2 * Math.atan(aspect * Math.tan(halfV)) * 180) / Math.PI
+}
+
+/** Every shape D2 tabulates, with the vertical fov the function must return and the
+ *  horizontal that implies. The design's own table rounds to one decimal and, on three
+ *  rows, rounds an intermediate rather than the composite (it prints 73.6 for the
+ *  square, which is the horizontal BEFORE the vertical band trims it to 73.485, and
+ *  46.0 / 79.4 where the exact composites are 46.097 / 79.339). These are the exact
+ *  composites; the divergence is at most 0.12 degrees and is reported, not smuggled. */
+const D2_TABLE: readonly [name: string, aspect: number, vOut: number, hOut: number][] = [
+  ['portrait phone', 0.462, 85.2863, 46.0969],
+  ['square', 1.0, 73.4852, 73.4852],
+  ['unfolded foldable', 1.2, 66.6049, 76.4993],
+  ['4:3 tablet', 1.333, 63.7751, 79.339],
+  ['16:10 tablet', 1.6, 62, 87.7438],
+  ['16:9 phone', 1.778, 62, 93.7843],
+  ['20:9 phone', 2.167, 58.6389, 101.182],
+  ['folded cover', 2.56, 52.8999, 103.7228],
+]
+
+describe('softBand (D2)', () => {
+  const { hLowKnee, hFloor, hHighKnee, hCeil } = PROJECTION_BAND
+  const band = (x: number): number => softBand(x, hLowKnee, hFloor, hHighKnee, hCeil)
+
+  it('is the identity between the knees, inclusive, and bit-for-bit so', () => {
+    for (const x of [86, 87.3, 90, 93.784316, 94]) expect(band(x)).toBe(x)
+  })
+
+  it('eases onto the ceiling above the high knee, and the floor below the low one', () => {
+    // 94 + 12*(1 - e^-1) and 86 - 16*(1 - e^-1): one span past the knee is one
+    // e-folding, which is the whole shape of the map in one number each way.
+    expect(band(hHighKnee + (hCeil - hHighKnee))).toBeCloseTo(101.585447, 5)
+    expect(band(hLowKnee - (hLowKnee - hFloor))).toBeCloseTo(75.886071, 5)
+  })
+
+  it('never reaches either asymptote, and never leaves the band, over 1..400 degrees', () => {
+    // Strictly inside, not merely inside: a clamp would sit exactly ON the bound, and
+    // `toBeLessThanOrEqual` would wave it through.
+    for (let x = 1; x <= 400; x += 0.25) {
+      expect(band(x), `x=${x}`).toBeGreaterThan(hFloor)
+      expect(band(x), `x=${x}`).toBeLessThan(hCeil)
+    }
+  })
+
+  it('is strictly increasing across the knees and far into both tails', () => {
+    let previous = Number.NEGATIVE_INFINITY
+    for (let x = 1; x <= 400; x += 0.05) {
+      const y = band(x)
+      expect(y, `not increasing at x=${x}`).toBeGreaterThan(previous)
+      previous = y
+    }
+  })
+
+  it('is C1 at both knees — slope 1 on either side, so there is no visible crease', () => {
+    const e = 1e-4
+    expect((band(hHighKnee + e) - band(hHighKnee - e)) / (2 * e)).toBeCloseTo(1, 4)
+    expect((band(hLowKnee + e) - band(hLowKnee - e)) / (2 * e)).toBeCloseTo(1, 4)
+  })
+})
+
+describe('projectionFovDegrees (D2)', () => {
+  it.each(D2_TABLE)('gives %s (aspect %f) the tabulated fov', (_name, aspect, vOut, hOut) => {
+    const solved = projectionFovDegrees(P.fovDegrees, aspect)
+    expect(solved).toBeCloseTo(vOut, 3)
+    expect(horizontalFov(solved, aspect)).toBeCloseTo(hOut, 3)
+  })
+
+  it('leaves 16:9 and 16:10 bit-for-bit untouched, including the e2e viewport', () => {
+    // Not `toBeCloseTo`: D2 pins the reference phone and the 1280x720 Playwright
+    // viewport as EXACTLY unchanged, which is what makes every existing golden frame
+    // and every existing camera assertion still mean what it meant. A tan/atan round
+    // trip that returned 61.99999999999999 would satisfy a tolerance and break that
+    // promise.
+    expect(projectionFovDegrees(62, 1.778)).toBe(62)
+    expect(projectionFovDegrees(62, 1.6)).toBe(62)
+    expect(projectionFovDegrees(62, 1280 / 720)).toBe(62)
+    expect(projectionFovDegrees(62, 800 / 400)).not.toBe(62) // the 2.0 fixture IS banded
+  })
+
+  it('still widens for the boost kick on every shape — the anti-clamp assertion', () => {
+    // THE test that a hard ceiling fails. `fovDegrees + fovBoostDegrees` arrives here
+    // already summed (updateCamera writes one number), so a clamp maps 62 and 70 onto
+    // the same output on any wide screen and deletes the kick with camera.test's own
+    // boost assertions still green, because those run upstream of this function.
+    for (const [name, aspect] of D2_TABLE) {
+      const base = projectionFovDegrees(P.fovDegrees, aspect)
+      const boosted = projectionFovDegrees(P.fovDegrees + P.fovBoostDegrees, aspect)
+      expect(boosted, `${name} lost the boost kick`).toBeGreaterThan(base)
+    }
+  })
+
+  it('is strictly monotone in the authored fov, at every shape', () => {
+    for (const [name, aspect] of D2_TABLE) {
+      let previous = Number.NEGATIVE_INFINITY
+      for (let fov = 40; fov <= 110; fov += 0.05) {
+        const solved = projectionFovDegrees(fov, aspect)
+        expect(solved, `${name} not increasing at fov=${fov}`).toBeGreaterThan(previous)
+        previous = solved
+      }
+    }
+  })
+
+  it('always gives a wider screen a wider horizontal fov, across the whole range', () => {
+    // The property D2 exists to guarantee, checked continuously rather than at the
+    // eight tabulated points: between them a band could invert (a clamp plus a
+    // rescale does exactly that) and every row above would still pass.
+    let previous = Number.NEGATIVE_INFINITY
+    for (let aspect = 0.3; aspect <= 3.5; aspect += 0.0025) {
+      const h = horizontalFov(projectionFovDegrees(P.fovDegrees, aspect), aspect)
+      expect(h, `horizontal fov fell at aspect=${aspect}`).toBeGreaterThan(previous)
+      previous = h
+    }
+    // ...and it really did move: an implementation that returned a constant would pass
+    // nothing above, but say so anyway.
+    expect(previous).toBeGreaterThan(horizontalFov(projectionFovDegrees(P.fovDegrees, 0.3), 0.3))
+  })
+
+  it('keeps the returned vertical fov strictly inside the vertical band, 0.3 to 3.5', () => {
+    // Sky headroom. The chase axis is pitched down only atan(3/15) = 11.31 degrees, so
+    // half the vertical fov minus that is what is visible above the horizon; the floor
+    // is what stops an ultra-wide screen from staring at tarmac.
+    //
+    // NOTE: D2's test sketch asks instead for the IMPLIED HORIZONTAL to stay inside
+    // [hFloor, hCeil] over this range, and that claim is false for the composite —
+    // by construction, since the same table demands 46 degrees of horizontal in
+    // portrait, which is 24 below hFloor, and aspect 3.5 lands on 110.6, above hCeil.
+    // It is the horizontal BAND that is bounded (asserted directly above); what the
+    // composite bounds is the vertical it returns.
+    for (let aspect = 0.3; aspect <= 3.5; aspect += 0.001) {
+      const solved = projectionFovDegrees(P.fovDegrees, aspect)
+      expect(solved, `aspect=${aspect}`).toBeGreaterThan(PROJECTION_BAND.vFloor)
+      expect(solved, `aspect=${aspect}`).toBeLessThan(PROJECTION_BAND.vCeil)
+    }
+  })
+
+  it('narrows the spread it exists to narrow', () => {
+    // The claim in prose: 1.59x of landscape horizontal spread becomes 1.36x. Asserted
+    // as an inequality on the ratio so it fails if the band is ever widened into
+    // irrelevance or removed.
+    const widest = horizontalFov(projectionFovDegrees(P.fovDegrees, 2.56), 2.56)
+    const narrowest = horizontalFov(projectionFovDegrees(P.fovDegrees, 1.2), 1.2)
+    expect(horizontalFov(P.fovDegrees, 2.56) / horizontalFov(P.fovDegrees, 1.2)).toBeCloseTo(
+      1.59,
+      2,
+    )
+    expect(widest / narrowest).toBeCloseTo(1.356, 2)
+  })
+
+  it('reaches the barrel, by identity', () => {
+    expect(barrel.projectionFovDegrees).toBe(projectionFovDegrees)
+    expect(barrel.softBand).toBe(softBand)
+    expect(barrel.PROJECTION_BAND).toBe(PROJECTION_BAND)
+  })
+
+  it('freezes the policy constants at D2’s eight values', () => {
+    expect(PROJECTION_BAND).toEqual({
+      hLowKnee: 86,
+      hFloor: 70,
+      hHighKnee: 94,
+      hCeil: 106,
+      vLowKnee: 52,
+      vFloor: 40,
+      vHighKnee: 72,
+      vCeil: 86,
+    })
+    expect(Object.isFrozen(PROJECTION_BAND)).toBe(true)
   })
 })

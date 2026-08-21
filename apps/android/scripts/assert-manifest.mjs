@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 //
-// §12.2 assertions 19-24, over the MERGED manifest — not the source one, because
-// AGP merges elements in from every library and the file that matters is the one
-// that ends up in the APK.
+// §12.2 assertions 19-24, plus the R51 adaptive-layout assertions 25-28, over
+// the MERGED manifest — not the source one, because AGP merges elements in from
+// every library and the file that matters is the one that ends up in the APK.
 //
 // Run:  node apps/android/scripts/assert-manifest.mjs [debug|release]
 // After: apps/android/gradlew -p apps/android :app:assemble<Variant>
@@ -70,13 +70,21 @@ async function shippedConstants() {
  *  is well-formed XML with no entities, no CDATA and no namespaces beyond the
  *  android one. */
 function parseXml(text) {
-  const root = { name: '#root', attrs: {}, children: [] }
+  const root = { name: '#root', attrs: {}, children: [], text: '' }
   const stack = [root]
   let elements = 0
   let i = 0
   while (i < text.length) {
     const lt = text.indexOf('<', i)
     if (lt < 0) break
+    // Text runs, accumulated onto whichever element is currently open. The
+    // manifest needs none of this, but a style resource puts an item's VALUE
+    // here — <item name="...">shortEdges</item> — and assertion 28 is about
+    // that value, not about the element merely existing.
+    if (lt > i) {
+      const open = stack[stack.length - 1]
+      open.text += text.slice(i, lt)
+    }
     if (text.startsWith('<!--', lt)) {
       const end = text.indexOf('-->', lt)
       i = end < 0 ? text.length : end + 3
@@ -110,7 +118,7 @@ function parseXml(text) {
     const body = selfClosing ? raw.slice(0, -1) : raw
     const nameMatch = /^\s*([^\s/>]+)/.exec(body)
     if (nameMatch === null) continue
-    const node = { name: nameMatch[1], attrs: {}, children: [] }
+    const node = { name: nameMatch[1], attrs: {}, children: [], text: '' }
     const attrRe = /([A-Za-z_][-A-Za-z0-9_.:]*)\s*=\s*("([^"]*)"|'([^']*)')/g
     let m
     while ((m = attrRe.exec(body)) !== null) {
@@ -317,6 +325,57 @@ for (const path of manifests) {
     }
   }
 
+  // 25-27. R51 — "every viewport is a layout". These three attributes are what
+  // make a fold, an unfold, a rotate to portrait or a multi-window drag a
+  // resize the WebView survives, instead of an activity recreation that reloads
+  // the page and drops the live race back to the title screen. That failure is
+  // completely silent: no crash, no log, nothing to grep for, and it presents
+  // as a networking bug.
+  const inviteActivity = descendants(manifest, 'activity').find((a) =>
+    descendants(a, 'intent-filter').some((f) => f.attrs['android:autoVerify'] === 'true'),
+  )
+  check(inviteActivity !== undefined, `${path}: no activity owns the autoVerify intent filter`)
+  if (inviteActivity !== undefined) {
+    // 25. No orientation lock, anywhere. Android 16 ignores screenOrientation
+    // on sw >= 600dp displays regardless, so re-adding it would not restore the
+    // old behaviour on a tablet — it would only strand the phone.
+    check(
+      inviteActivity.attrs['android:screenOrientation'] === undefined,
+      `${path}: the invite activity declares android:screenOrientation=` +
+        `'${inviteActivity.attrs['android:screenOrientation']}'. R51 retired the lock: portrait, ` +
+        'square and every aspect between are laid out and playable, and the lock is unenforceable ' +
+        'on the large screens it was supposed to protect.',
+    )
+
+    // 26. Declared intent, not an implicit default — an assertion cannot fail
+    // on a default that is simply absent from the file.
+    check(
+      inviteActivity.attrs['android:resizeableActivity'] === 'true',
+      `${path}: android:resizeableActivity is '${inviteActivity.attrs['android:resizeableActivity']}', ` +
+        'not "true"',
+    )
+
+    // 27. density and fontScale are the foldable cases: an inner and an outer
+    // panel can report different densities, so an unfold is a density change as
+    // well as a size change, and an undeclared one destroys the activity.
+    const configChanges = (inviteActivity.attrs['android:configChanges'] ?? '').split('|')
+    for (const required of [
+      'orientation',
+      'screenSize',
+      'smallestScreenSize',
+      'screenLayout',
+      'density',
+      'fontScale',
+    ]) {
+      check(
+        configChanges.includes(required),
+        `${path}: android:configChanges does not handle '${required}' ` +
+          `(it is '${inviteActivity.attrs['android:configChanges']}'). An unhandled configuration ` +
+          'change recreates the activity, reloads the WebView, and silently ends the race.',
+      )
+    }
+  }
+
   // The permissions and features §6.2 fixes. required="false" on both is
   // deliberate: only the HOST needs NFC, and a guest with a non-NFC phone must
   // still be able to install the APK and play.
@@ -329,6 +388,71 @@ for (const path of manifests) {
     check(
       f?.attrs['android:required'] === 'false',
       `${path}: <uses-feature ${feature}> is required, which excludes every non-NFC phone from installing`,
+    )
+  }
+}
+
+// 28. The display-cutout theme — source resources, not merged ones.
+//
+// AppTheme.NoActionBar is the theme in force at runtime: BridgeActivity calls
+// setTheme(R.style.AppTheme_NoActionBar) before setContentView, so the launch
+// theme named in the manifest is gone by the time the WebView exists. The
+// attribute is API 27+, hence the values-v27 folder.
+//
+// A style in a qualified folder REPLACES the base style rather than merging
+// with it, so values-v27 has to repeat every base item. That is a copy, and a
+// copy drifts, so this asserts the superset relation directly instead of
+// trusting whoever edits res/values/styles.xml next to remember.
+{
+  const stylesOf = (dir) => {
+    const path = join(ANDROID_DIR, 'app', 'src', 'main', 'res', dir, 'styles.xml')
+    // A deleted values-v27/styles.xml is the most likely way this regresses, and
+    // it must read as a named assertion failure rather than an ENOENT stack.
+    let text
+    try {
+      text = readFileSync(path, 'utf8')
+    } catch {
+      return { path, style: undefined, items: new Map() }
+    }
+    const { root } = parseXml(text)
+    const style = descendants(root, 'style').find(
+      (n) => n.attrs['name'] === 'AppTheme.NoActionBar',
+    )
+    const items = new Map()
+    for (const item of style === undefined ? [] : descendants(style, 'item')) {
+      items.set(item.attrs['name'], item.text.trim())
+    }
+    return { path, style, items }
+  }
+
+  const base = stylesOf('values')
+  const v27 = stylesOf('values-v27')
+
+  check(base.style !== undefined, `${base.path}: no <style name="AppTheme.NoActionBar">`)
+  check(
+    v27.style !== undefined,
+    `${v27.path}: no <style name="AppTheme.NoActionBar">. Without it the app draws into the ` +
+      'display cutout on whatever the target SDK happens to default to that year.',
+  )
+  if (base.style !== undefined && v27.style !== undefined) {
+    check(
+      v27.style.attrs['parent'] === base.style.attrs['parent'],
+      `${v27.path}: the v27 override's parent is '${v27.style.attrs['parent']}' but the base style's ` +
+        `is '${base.style.attrs['parent']}' — on API 27+ the override wins outright and the theme ` +
+        'quietly becomes a different theme',
+    )
+    for (const [name, value] of base.items) {
+      check(
+        v27.items.get(name) === value,
+        `${v27.path}: AppTheme.NoActionBar drops or changes '${name}' ('${value}' in ` +
+          `${base.path}, '${v27.items.get(name)}' here). The qualified style REPLACES the base one ` +
+          'on API 27+; it must be a superset of it.',
+      )
+    }
+    check(
+      v27.items.get('android:windowLayoutInDisplayCutoutMode') === 'shortEdges',
+      `${v27.path}: android:windowLayoutInDisplayCutoutMode is ` +
+        `'${v27.items.get('android:windowLayoutInDisplayCutoutMode')}', not 'shortEdges'`,
     )
   }
 }
@@ -353,7 +477,7 @@ for (const path of manifests) {
 }
 
 if (problems.length > 0) {
-  console.error('FAIL: the manifest does not satisfy §12.2 assertions 19-24:')
+  console.error('FAIL: the manifest does not satisfy §12.2 assertions 19-28:')
   for (const p of problems) console.error(`  - ${p}`)
   console.error(
     '\nNone of these produce a runtime error on a phone. A failed App Link verification is silent on\n' +

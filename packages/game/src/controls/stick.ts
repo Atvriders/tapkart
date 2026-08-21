@@ -1,16 +1,8 @@
 import type { Intent } from '@tapkart/sim'
 import { clamp, lerp } from '@tapkart/sim'
-import type { ControlAdapter, ControlInputs, Viewport } from './types'
-import type { ControlConfig, Rect } from './config'
-import {
-  THUMBZONE_FULL_LOCK_FRACTION,
-  brakeButtonRect,
-  driftButtonRect,
-  gasButtonRect,
-  itemButtonRect,
-  rectContains,
-  steeringZoneRect,
-} from './config'
+import type { ControlAdapter, ControlInputs } from './types'
+import type { ControlConfig, ControlMetrics, Rect } from './config'
+import { brakeButtonRect, controlMetrics, createControlMetrics, driftButtonRect, gasButtonRect, itemButtonRect, rectContains, steeringZoneRect } from './config'
 
 /**
  * Virtual stick + pedals (spec §6: "most control, most screen occlusion").
@@ -37,10 +29,11 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
   let originX = 0
   let currentX = 0
   let steer = 0
+  const metrics: ControlMetrics = createControlMetrics()
 
-  function steerAxis(v: Viewport): number {
+  function steerAxis(m: ControlMetrics): number {
     if (stickId === -1) return 0
-    const lockPx = v.width * 0.5 * THUMBZONE_FULL_LOCK_FRACTION
+    const lockPx = m.fullLockPx
     if (!(lockPx > 0)) return 0
     return clamp((currentX - originX) / lockPx, -1, 1)
   }
@@ -49,11 +42,12 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
     scheme: 'virtualStick',
 
     sample(raw: ControlInputs, tick: number, out: Intent): void {
-      driftButtonRect(raw.viewport, driftRect)
-      itemButtonRect(raw.viewport, itemRect)
-      gasButtonRect(raw.viewport, gasRect)
-      brakeButtonRect(raw.viewport, brakeRect)
-      steeringZoneRect(raw.viewport, steeringRect)
+      controlMetrics(raw.viewport, raw.insets, metrics)
+      driftButtonRect(raw.viewport, metrics, driftRect)
+      itemButtonRect(raw.viewport, metrics, itemRect)
+      gasButtonRect(raw.viewport, metrics, gasRect)
+      brakeButtonRect(raw.viewport, metrics, brakeRect)
+      steeringZoneRect(raw.viewport, metrics, raw.insets, steeringRect)
 
       let itemPulse = false
 
@@ -87,7 +81,7 @@ export function makeVirtualStickAdapter(cfg: ControlConfig): ControlAdapter {
         }
       }
 
-      let axis = steerAxis(raw.viewport)
+      let axis = steerAxis(metrics)
       if (Math.abs(axis) < cfg.deadZone) axis = 0
       const target = clamp(axis * cfg.steerGain, -1, 1)
       steer = clamp(lerp(steer, target, cfg.steerSmoothingPerTick), -1, 1)

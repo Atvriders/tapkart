@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    API 27+ only, because android:windowLayoutInDisplayCutoutMode does not exist
+    before it and minSdk here is 26.
+
+    This overrides AppTheme.NoActionBar, which is the theme actually in force at
+    runtime: BridgeActivity calls setTheme(R.style.AppTheme_NoActionBar) before
+    setContentView, so the launch theme in the manifest is replaced the moment
+    the bridge starts. Putting the cutout mode on the launch theme instead would
+    look right in the manifest and do nothing.
+
+    shortEdges is declared rather than left to the platform default because that
+    default has changed with the target SDK before, and with the system bars
+    hidden the app is already drawing into the cutout band. What keeps the HUD
+    and the button cluster off the cutout is the safe-area inset probe on the
+    web side, not this attribute.
+
+    RESOURCE OVERRIDE, NOT A MERGE: a style declared in a qualified folder
+    replaces the whole style for that configuration, so every item from
+    res/values/styles.xml has to be repeated here. assert-manifest.mjs asserts
+    this file is a superset of the base style precisely so that the copy cannot
+    silently drift.
+-->
+<resources>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

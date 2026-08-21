@@ -3,13 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { LOBBY_PATH_PREFIX, ROOM_CODE_LENGTH } from '@tapkart/protocol'
 import { describe, expect, it } from 'vitest'
 import { MAX_INVITE_ORIGIN_BYTES } from '../src/invite'
-import {
-  QR_ECC_LEVEL,
-  QR_MAX_VERSION,
-  QR_QUIET_ZONE,
-  buildQrMatrix,
-  qrModuleAt,
-} from '../src/qr'
+import { QR_ECC_LEVEL, QR_MAX_VERSION, QR_QUIET_ZONE, buildQrMatrix, qrCanvasScale, qrModuleAt } from '../src/qr'
 
 const SYMBOLS_FILE = fileURLToPath(new URL('../vectors/qr-symbol.txt', import.meta.url))
 const TABLES_FILE = fileURLToPath(new URL('../vectors/qr-reference.tsv', import.meta.url))
@@ -273,5 +267,47 @@ describe('§5.9 layer 3 — the longest invite URI this game can build fits', ()
     expect(longest.length).toBe(MAX_INVITE_ORIGIN_BYTES + LOBBY_PATH_PREFIX.length + ROOM_CODE_LENGTH)
     const m = buildQrMatrix(longest)
     expect(m.size).toBeLessThanOrEqual(4 * QR_MAX_VERSION + 17)
+  })
+})
+
+describe('qrCanvasScale keeps the code inside the panel and sharp', () => {
+  const MODULES = 33 // a version-4 code plus both quiet zones
+
+  it.each([
+    [320, 1], [320, 2], [320, 3],
+    [390, 1], [390, 2], [390, 3],
+    [844, 2], [1280, 2], [1280, 3],
+  ])('fits within a %i px short edge at dpr %i', (shortEdge, dpr) => {
+    const { cssScale, backingScale } = qrCanvasScale(MODULES, shortEdge, dpr)
+    // The invite panel's content box; overflow here is CLIPPED, not scrolled, and
+    // a clipped QR code fails to scan without reporting anything.
+    expect(MODULES * cssScale).toBeLessThanOrEqual(shortEdge - 96)
+    // Never so small it stops being scannable across a table.
+    expect(MODULES * cssScale).toBeGreaterThanOrEqual(96)
+    // Drawn at device resolution, so it is not soft on a 2x or 3x screen.
+    expect(backingScale).toBe(cssScale * Math.min(dpr, 3))
+    // Integer module edges: a fractional one lands mid-pixel and blurs.
+    expect(Number.isInteger(cssScale)).toBe(true)
+    expect(Number.isInteger(backingScale)).toBe(true)
+  })
+
+  it('holds a 2 px-per-module floor for the largest code this project emits', () => {
+    // QR_MAX_VERSION 10 is a 57-module code, 65 with both quiet zones. That is the
+    // only size at which the floor is reachable: the 160 px lower clamp keeps a
+    // 33-module code well above it. Below 2 px per module a camera cannot resolve
+    // the modules at all, so this is the point the floor exists to defend.
+    const biggest = 57 + QR_QUIET_ZONE * 2
+    expect(qrCanvasScale(biggest, 160, 1).cssScale).toBe(2)
+    expect(qrCanvasScale(biggest, 320, 1).cssScale).toBe(3)
+  })
+
+  it('caps the backing store at 3x so a 4x screen does not allocate uselessly', () => {
+    expect(qrCanvasScale(MODULES, 844, 4).backingScale).toBe(qrCanvasScale(MODULES, 844, 3).backingScale)
+  })
+
+  it('grows with the screen rather than staying a postage stamp on a tablet', () => {
+    const phone = qrCanvasScale(MODULES, 390, 2).cssScale
+    const tablet = qrCanvasScale(MODULES, 1280, 2).cssScale
+    expect(tablet).toBeGreaterThan(phone)
   })
 })

@@ -14,6 +14,7 @@ import * as results from '../src/results'
 import * as session from '../src/session'
 import * as settings from '../src/settings'
 import * as view from '../src/view'
+import * as display from '../src/display'
 
 const MODULES: Array<[string, Record<string, unknown>]> = [
   ['clock', clock],
@@ -30,6 +31,7 @@ const MODULES: Array<[string, Record<string, unknown>]> = [
   ['multiplayer', multiplayer],
   ['multiplayer-session', multiplayerSession],
   ['view', view],
+  ['display', display],
 ]
 
 describe('@tapkart/game barrel', () => {

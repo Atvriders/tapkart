@@ -19,6 +19,16 @@ export interface TiltSample { alpha: number; beta: number; gamma: number } // de
 
 export interface Viewport { width: number; height: number } // CSS px
 
+/**
+ * Unusable margins the viewport reports but the player cannot reach or see: a
+ * display cutout, a rounded corner, a gesture bar. CSS px, one per edge.
+ *
+ * These are NOT subtracted from `Viewport`. Pointer coordinates arrive in full
+ * viewport space, so shrinking the viewport would move every hit rect away from
+ * the affordance drawn for it. Layout consumes the two together instead.
+ */
+export interface Insets { top: number; right: number; bottom: number; left: number } // CSS px
+
 export const MAX_POINTERS = 8
 
 /**
@@ -32,6 +42,7 @@ export interface ControlInputs {
   keys: Record<string, boolean> // KeyboardEvent.code, e.g. 'ArrowLeft', 'KeyZ'
   tilt: TiltSample | null // null when unavailable or not permitted
   viewport: Viewport
+  insets: Insets
 }
 
 /** Boundary between browser input events and the deterministic control layer.
@@ -52,7 +63,14 @@ export interface InputSource {
 export function createControlInputs(): ControlInputs {
   const pointers: PointerSample[] = []
   for (let i = 0; i < MAX_POINTERS; i++) pointers.push({ id: -1, x: 0, y: 0, phase: 'up' })
-  return { pointers, pointerCount: 0, keys: {}, tilt: null, viewport: { width: 0, height: 0 } }
+  return {
+    pointers,
+    pointerCount: 0,
+    keys: {},
+    tilt: null,
+    viewport: { width: 0, height: 0 },
+    insets: { top: 0, right: 0, bottom: 0, left: 0 },
+  }
 }
 
 /**
