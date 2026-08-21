@@ -290,6 +290,31 @@ describe('the image is wired the way §11.1 fixes it', () => {
    * published. The default is still `latest`, and is asserted as such: `edge`
    * is what a self-hoster opts into, never what they get by accident.
    */
+  /**
+   * The label that links the published package to this repository.
+   *
+   * Its absence is silent and easy to misread as a failed publish: the image
+   * still builds, still pushes, and still pulls anonymously, but GitHub shows
+   * nothing under Packages on the repository page, so the only ways to reach it
+   * are its direct URL or a search of the account's package list. That is
+   * exactly how this image looked missing after it had in fact been published.
+   *
+   * It lives in the runtime stage because that is the stage that becomes the
+   * published image -- a label on the build stage is discarded with it -- and in
+   * the Dockerfile rather than in a workflow input so that every build path
+   * carries it, including a local `docker build` and the release workflow, which
+   * is a second `build-push-action` that would otherwise need the same fix again.
+   */
+  it('labels the image with the repository that publishes it', () => {
+    const runtime = DOCKERFILE.slice(DOCKERFILE.indexOf('AS runtime'))
+    const source = /org\.opencontainers\.image\.source="([^"]+)"/.exec(runtime)
+    expect(source, 'the runtime stage carries no image.source label').not.toBeNull()
+    expect(source![1]).toBe('https://github.com/Atvriders/tapkart')
+    // The compose file pulls from the same account/name the label points at.
+    const image = /image:\s*ghcr\.io\/([^:\s]+)/.exec(COMPOSE)
+    expect(image![1]).toBe(source![1].replace('https://github.com/', '').toLowerCase())
+  })
+
   it('defaults to latest and lets a self-hoster override the tag', () => {
     const match = /image:\s*ghcr\.io\/atvriders\/tapkart:(\S+)/.exec(COMPOSE)
     expect(match).not.toBeNull()

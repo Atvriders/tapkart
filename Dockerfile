@@ -40,6 +40,15 @@ COPY --chown=node:node docker/entrypoint.sh /app/entrypoint.sh
 RUN mkdir -p /app/web/.well-known && chown -R node:node /app/web/.well-known \
     && chmod +x /app/entrypoint.sh
 
+# Links the published package to this repository. Without it the image is still
+# public and still pullable, but GitHub shows nothing under Packages on the
+# repository page -- the package is reachable only by its direct URL or by
+# searching the account's package list, which is where this one went missing.
+LABEL org.opencontainers.image.source="https://github.com/Atvriders/tapkart" \
+      org.opencontainers.image.url="https://github.com/Atvriders/tapkart" \
+      org.opencontainers.image.title="Tapkart" \
+      org.opencontainers.image.description="Mobile browser kart racer with NFC tap-to-join."
+
 ENV BIND_HOST=0.0.0.0
 ENV STATIC_ROOT=/app/web
 ENV SHADOW_ENABLED=true
